@@ -21,6 +21,7 @@ except:
     JSONBIN_KEY = ""
 
 def load_db_from_cloud():
+    """Force le téléchargement depuis le Cloud"""
     url = f"https://api.jsonbin.io/v3/b/{JSONBIN_ID}/latest"
     headers = {"X-Master-Key": JSONBIN_KEY}
     try:
@@ -29,13 +30,16 @@ def load_db_from_cloud():
             return response.json()['record']
     except:
         pass
+    # Si échec ou vide, on renvoie la structure de base
     return {"users": {}, "fleet": []}
 
 def save_db_to_cloud(data):
+    """Envoie les données au Cloud"""
     url = f"https://api.jsonbin.io/v3/b/{JSONBIN_ID}"
     headers = {"Content-Type": "application/json", "X-Master-Key": JSONBIN_KEY}
     requests.put(url, json=data, headers=headers)
 
+# Initialisation de la DB en session si elle n'existe pas encore
 if 'db' not in st.session_state:
     st.session_state.db = load_db_from_cloud()
 
@@ -67,8 +71,11 @@ def add_ship_action(ship_name, owner):
         "Visuel": img_b64
     }
     
+    # On met à jour la session locale
     st.session_state.db["fleet"].append(new_entry)
     st.session_state.session_log.append(f"+ {ship_name}")
+    
+    # On sauvegarde immédiatement dans le Cloud
     save_db_to_cloud(st.session_state.db)
     
     st.toast(f"✅ {ship_name} AJOUTÉ !", icon="🚀")
@@ -79,6 +86,7 @@ def process_fleet_updates(edited_df):
     needs_save = False
     current_db = st.session_state.db
     
+    # Suppression
     if "Supprimer" in edited_df.columns:
         ids_to_delete = edited_df[edited_df["Supprimer"] == True]["id"].tolist()
         if ids_to_delete:
@@ -86,6 +94,7 @@ def process_fleet_updates(edited_df):
             needs_save = True
             st.toast(f"🗑️ {len(ids_to_delete)} supprimés.", icon="🗑️")
 
+    # Update Dispo
     fleet_map = {s["id"]: s for s in current_db["fleet"]}
     for index, row in edited_df.iterrows():
         ship_id = row["id"]
@@ -142,12 +151,6 @@ st.markdown(f"""
     div.stButton > button[kind="primary"] {{ border: 1px solid #00d4ff; color: #00d4ff; }}
     div.stButton > button[kind="primary"]:hover {{ background: #00d4ff; color: #000; }}
 
-    /* Modification MultiSelect pour le rendre joli */
-    .stMultiSelect > div > div {{
-        background-color: rgba(0, 0, 0, 0.6) !important;
-        border: 1px solid #333 !important;
-        color: white !important;
-    }}
     .stTextInput > div > div, .stSelectbox > div > div {{
         background-color: rgba(0, 0, 0, 0.6) !important; color: #fff !important;
         border: 1px solid #333 !important; border-radius: 0px !important;
@@ -174,8 +177,6 @@ if 'menu_nav' not in st.session_state:
 if 'session_log' not in st.session_state:
     st.session_state.session_log = []
 
-db = st.session_state.db
-
 # --- 6. SIDEBAR ---
 with st.sidebar:
     st.markdown("<h2 style='text-align: left; color: #fff !important; font-size: 1.5em; border:none;'>💠 PIONEER</h2>", unsafe_allow_html=True)
@@ -187,19 +188,28 @@ with st.sidebar:
             pseudo = st.text_input("ID")
             pin = st.text_input("PIN", type="password", max_chars=4)
             if st.form_submit_button("INITIALISER", type="primary"):
+                
+                # --- CORRECTIF MAJEUR ICI ---
+                # On force le re-téléchargement de la DB depuis le Cloud AVANT de vérifier
                 st.session_state.db = load_db_from_cloud()
+                # -----------------------------
+
                 if pseudo and len(pin) == 4:
                     if pseudo in st.session_state.db["users"]:
                         if st.session_state.db["users"][pseudo] == pin:
                             st.session_state.current_pilot = pseudo
+                            st.success(f"Retour confirmé, {pseudo} !")
+                            time.sleep(0.5)
                             st.rerun()
                         else:
                             st.error("PIN Erroné")
                     else:
+                        # Nouvel utilisateur
                         st.session_state.db["users"][pseudo] = pin
                         save_db_to_cloud(st.session_state.db)
                         st.session_state.current_pilot = pseudo
-                        st.success("OK")
+                        st.success("Profil créé")
+                        time.sleep(0.5)
                         st.rerun()
                 else:
                     st.error("Données invalides")
@@ -243,41 +253,12 @@ else:
     if st.session_state.menu_nav == "CATALOGUE":
         st.subheader("Base de Données")
         c1, c2 = st.columns([1, 3])
-        
-        # Filtre Marque
         brand_filter = c1.selectbox("Constructeur", ["Tous"] + sorted(list(set(d['brand'] for d in SHIPS_DB.values()))))
-        
-        # --- MODIFICATION ICI : RECHERCHE INTELLIGENTE ---
-        # Liste de tous les noms de vaisseaux disponibles
-        all_ship_names = sorted(list(SHIPS_DB.keys()))
-        
-        # Multiselect = Barre de recherche avec suggestions
-        search_selection = c2.multiselect(
-            "Recherche Rapide", 
-            all_ship_names, 
-            placeholder="Tapez le nom (ex: Zeus, C2)..."
-        )
+        search = c2.text_input("Recherche")
 
-        # Logique de filtrage mise à jour
-        filtered = {}
-        for name, data in SHIPS_DB.items():
-            # 1. Filtre Marque
-            match_brand = (brand_filter == "Tous") or (data['brand'] == brand_filter)
-            
-            # 2. Filtre Recherche
-            # Si la barre est vide, on considère que c'est bon (pour afficher tout)
-            # Sinon, on ne garde que les vaisseaux sélectionnés
-            if not search_selection:
-                match_search = True
-            else:
-                match_search = name in search_selection
-            
-            if match_brand and match_search:
-                filtered[name] = data
-
+        filtered = {k: v for k, v in SHIPS_DB.items() if (brand_filter == "Tous" or v['brand'] == brand_filter) and (not search or search.lower() in k.lower())}
         items = list(filtered.items())
         
-        # --- PAGINATION ---
         ITEMS_PER_PAGE = 20
         total_pages = max(1, (len(items) // ITEMS_PER_PAGE) + (1 if len(items) % ITEMS_PER_PAGE > 0 else 0))
         
@@ -311,6 +292,7 @@ else:
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
+                
                 if st.button("AJOUTER", key=f"add_{name}"):
                     add_ship_action(name, st.session_state.current_pilot)
 
@@ -324,6 +306,7 @@ else:
             
         st.markdown("---")
         
+        # On s'assure de lire la DB la plus à jour
         my_fleet = [s for s in st.session_state.db["fleet"] if s["Propriétaire"] == st.session_state.current_pilot]
         
         if not my_fleet:
@@ -428,6 +411,7 @@ else:
 
             if selection.selection["rows"]:
                 idx = selection.selection["rows"][0]
+                # On récupère l'index réel depuis le DataFrame affiché
                 selected_row = display_df.iloc[idx]
                 
                 st.markdown("---")
