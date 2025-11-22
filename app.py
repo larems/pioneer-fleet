@@ -21,7 +21,6 @@ except:
     JSONBIN_KEY = ""
 
 def load_db_from_cloud():
-    """Force le téléchargement depuis le Cloud"""
     url = f"https://api.jsonbin.io/v3/b/{JSONBIN_ID}/latest"
     headers = {"X-Master-Key": JSONBIN_KEY}
     try:
@@ -30,16 +29,13 @@ def load_db_from_cloud():
             return response.json()['record']
     except:
         pass
-    # Si échec ou vide, on renvoie la structure de base
     return {"users": {}, "fleet": []}
 
 def save_db_to_cloud(data):
-    """Envoie les données au Cloud"""
     url = f"https://api.jsonbin.io/v3/b/{JSONBIN_ID}"
     headers = {"Content-Type": "application/json", "X-Master-Key": JSONBIN_KEY}
     requests.put(url, json=data, headers=headers)
 
-# Initialisation de la DB en session si elle n'existe pas encore
 if 'db' not in st.session_state:
     st.session_state.db = load_db_from_cloud()
 
@@ -71,11 +67,8 @@ def add_ship_action(ship_name, owner):
         "Visuel": img_b64
     }
     
-    # On met à jour la session locale
     st.session_state.db["fleet"].append(new_entry)
     st.session_state.session_log.append(f"+ {ship_name}")
-    
-    # On sauvegarde immédiatement dans le Cloud
     save_db_to_cloud(st.session_state.db)
     
     st.toast(f"✅ {ship_name} AJOUTÉ !", icon="🚀")
@@ -86,7 +79,6 @@ def process_fleet_updates(edited_df):
     needs_save = False
     current_db = st.session_state.db
     
-    # Suppression
     if "Supprimer" in edited_df.columns:
         ids_to_delete = edited_df[edited_df["Supprimer"] == True]["id"].tolist()
         if ids_to_delete:
@@ -94,7 +86,6 @@ def process_fleet_updates(edited_df):
             needs_save = True
             st.toast(f"🗑️ {len(ids_to_delete)} supprimés.", icon="🗑️")
 
-    # Update Dispo
     fleet_map = {s["id"]: s for s in current_db["fleet"]}
     for index, row in edited_df.iterrows():
         ship_id = row["id"]
@@ -133,6 +124,7 @@ st.markdown(f"""
     h1, h2, h3 {{ font-family: 'Orbitron', sans-serif !important; color: #e0e0e0 !important; text-transform: uppercase; letter-spacing: 1px; }}
     p, div, span, label, button {{ font-family: 'Rajdhani', sans-serif !important; color: #ccc; }}
 
+    /* Cards */
     .catalog-card {{
         background: rgba(20, 20, 20, 0.8); border: 1px solid #333; border-radius: 4px;
         overflow: hidden; margin-bottom: 15px; transition: transform 0.2s;
@@ -143,6 +135,7 @@ st.markdown(f"""
     .card-title {{ color: #fff; font-weight: bold; font-size: 0.85rem; margin: 0; }}
     .card-sub {{ font-size: 0.65rem; color: #888; text-transform: uppercase; }}
 
+    /* Buttons */
     div.stButton > button {{
         width: 100%; background: #0e1117; color: #ccc; border: 1px solid #444;
         border-radius: 0px; font-family: 'Rajdhani'; font-weight: bold; text-transform: uppercase;
@@ -151,7 +144,8 @@ st.markdown(f"""
     div.stButton > button[kind="primary"] {{ border: 1px solid #00d4ff; color: #00d4ff; }}
     div.stButton > button[kind="primary"]:hover {{ background: #00d4ff; color: #000; }}
 
-    .stTextInput > div > div, .stSelectbox > div > div {{
+    /* Inputs */
+    .stTextInput input, .stMultiSelect div[data-baseweb="input"] {{
         background-color: rgba(0, 0, 0, 0.6) !important; color: #fff !important;
         border: 1px solid #333 !important; border-radius: 0px !important;
     }}
@@ -167,7 +161,7 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 5. STATE INIT ---
+# --- 5. SESSION STATE ---
 if 'current_pilot' not in st.session_state:
     st.session_state.current_pilot = None
 if 'catalog_page' not in st.session_state:
@@ -177,7 +171,89 @@ if 'menu_nav' not in st.session_state:
 if 'session_log' not in st.session_state:
     st.session_state.session_log = []
 
-# --- 6. SIDEBAR ---
+# --- 6. DATABASE & CORE LOGIC (VITAL FOR PERSISTENCE) ---
+
+# Je dois laisser cette variable globale pour que le code puisse l'utiliser dans toutes les fonctions
+db = st.session_state.db 
+
+def load_db_from_cloud():
+    url = f"https://api.jsonbin.io/v3/b/{JSONBIN_ID}/latest"
+    headers = {"X-Master-Key": JSONBIN_KEY}
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            return response.json()['record']
+    except:
+        pass
+    return {"users": {}, "fleet": []}
+
+def save_db_to_cloud(data):
+    url = f"https://api.jsonbin.io/v3/b/{JSONBIN_ID}"
+    headers = {"Content-Type": "application/json", "X-Master-Key": JSONBIN_KEY}
+    requests.put(url, json=data, headers=headers)
+
+@st.cache_data(show_spinner=False)
+def get_local_img_as_base64(path):
+    if os.path.exists(path):
+        with open(path, "rb") as f:
+            data = f.read()
+        encoded = base64.b64encode(data).decode()
+        return f"data:image/jpeg;base64,{encoded}"
+    return "https://via.placeholder.com/400x200/0b0e11/00d4ff?text=IMG+ERROR"
+
+def add_ship_action(ship_name, owner):
+    info = SHIPS_DB[ship_name]
+    new_id = int(time.time() * 1000)
+    
+    img_b64 = get_local_img_as_base64(info['img'])
+    
+    new_entry = {
+        "id": new_id,
+        "Propriétaire": owner,
+        "Vaisseau": ship_name,
+        "Marque": info['brand'],
+        "Rôle": info['role'],
+        "Prix": info['price'],
+        "Dispo": False,
+        "Image": info['img'],
+        "Visuel": img_b64
+    }
+    
+    st.session_state.db["fleet"].append(new_entry)
+    st.session_state.session_log.append(f"+ {ship_name}")
+    save_db_to_cloud(st.session_state.db)
+    
+    st.toast(f"✅ {ship_name} AJOUTÉ !", icon="🚀")
+    time.sleep(0.5)
+    st.rerun()
+
+def process_fleet_updates(edited_df):
+    needs_save = False
+    current_db = st.session_state.db
+    
+    if "Supprimer" in edited_df.columns:
+        ids_to_delete = edited_df[edited_df["Supprimer"] == True]["id"].tolist()
+        if ids_to_delete:
+            current_db["fleet"] = [s for s in current_db["fleet"] if s["id"] not in ids_to_delete]
+            needs_save = True
+            st.toast(f"🗑️ {len(ids_to_delete)} supprimés.", icon="🗑️")
+
+    fleet_map = {s["id"]: s for s in current_db["fleet"]}
+    for index, row in edited_df.iterrows():
+        ship_id = row["id"]
+        if ship_id in fleet_map:
+            if fleet_map[ship_id]["Dispo"] != row["Dispo"]:
+                fleet_map[ship_id]["Dispo"] = row["Dispo"]
+                needs_save = True
+    
+    if needs_save:
+        st.session_state.db = current_db
+        save_db_to_cloud(current_db)
+        st.success("✅ Synchronisation terminée")
+        time.sleep(1)
+        st.rerun()
+
+# --- 7. SIDEBAR ---
 with st.sidebar:
     st.markdown("<h2 style='text-align: left; color: #fff !important; font-size: 1.5em; border:none;'>💠 PIONEER</h2>", unsafe_allow_html=True)
     st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
@@ -188,28 +264,19 @@ with st.sidebar:
             pseudo = st.text_input("ID")
             pin = st.text_input("PIN", type="password", max_chars=4)
             if st.form_submit_button("INITIALISER", type="primary"):
-                
-                # --- CORRECTIF MAJEUR ICI ---
-                # On force le re-téléchargement de la DB depuis le Cloud AVANT de vérifier
                 st.session_state.db = load_db_from_cloud()
-                # -----------------------------
-
                 if pseudo and len(pin) == 4:
                     if pseudo in st.session_state.db["users"]:
                         if st.session_state.db["users"][pseudo] == pin:
                             st.session_state.current_pilot = pseudo
-                            st.success(f"Retour confirmé, {pseudo} !")
-                            time.sleep(0.5)
                             st.rerun()
                         else:
                             st.error("PIN Erroné")
                     else:
-                        # Nouvel utilisateur
                         st.session_state.db["users"][pseudo] = pin
                         save_db_to_cloud(st.session_state.db)
                         st.session_state.current_pilot = pseudo
-                        st.success("Profil créé")
-                        time.sleep(0.5)
+                        st.success("OK")
                         st.rerun()
                 else:
                     st.error("Données invalides")
@@ -237,7 +304,7 @@ with st.sidebar:
             st.session_state.menu_nav = selected_menu
             st.rerun()
 
-# --- 7. APP PRINCIPALE ---
+# --- 8. APP PRINCIPALE ---
 st.title("PIONEER ORG COMMAND")
 
 if not st.session_state.current_pilot:
@@ -253,12 +320,31 @@ else:
     if st.session_state.menu_nav == "CATALOGUE":
         st.subheader("Base de Données")
         c1, c2 = st.columns([1, 3])
+        
+        # Filtre Constructeur
         brand_filter = c1.selectbox("Constructeur", ["Tous"] + sorted(list(set(d['brand'] for d in SHIPS_DB.values()))))
-        search = c2.text_input("Recherche")
+        
+        # --- MODIFICATION ICI : RECHERCHE INTELLIGENTE ---
+        all_ships = sorted(list(SHIPS_DB.keys()))
+        search_selection = c2.multiselect("Recherche Rapide", all_ships, placeholder="Tapez le nom (ex: C2, Zeus)...")
 
-        filtered = {k: v for k, v in SHIPS_DB.items() if (brand_filter == "Tous" or v['brand'] == brand_filter) and (not search or search.lower() in k.lower())}
+        # Logique de filtrage mise à jour
+        filtered = {}
+        for name, data in SHIPS_DB.items():
+            match_brand = (brand_filter == "Tous") or (data['brand'] == brand_filter)
+            
+            # Filtre Recherche (Si vide = tout, sinon = sélection)
+            if not search_selection:
+                match_search = True
+            else:
+                match_search = name in search_selection
+            
+            if match_brand and match_search:
+                filtered[name] = data
+
         items = list(filtered.items())
         
+        # Pagination
         ITEMS_PER_PAGE = 20
         total_pages = max(1, (len(items) // ITEMS_PER_PAGE) + (1 if len(items) % ITEMS_PER_PAGE > 0 else 0))
         
@@ -300,13 +386,9 @@ else:
     elif st.session_state.menu_nav == "MON HANGAR":
         st.subheader(f"Inventaire : {st.session_state.current_pilot}")
         
-        if st.button("➕ ACQUÉRIR D'AUTRES VAISSEAUX", type="primary"):
-            st.session_state.menu_nav = "CATALOGUE"
-            st.rerun()
-            
+        # Je retire le bouton Acquérir d'autres vaisseaux
         st.markdown("---")
         
-        # On s'assure de lire la DB la plus à jour
         my_fleet = [s for s in st.session_state.db["fleet"] if s["Propriétaire"] == st.session_state.current_pilot]
         
         if not my_fleet:
@@ -314,6 +396,9 @@ else:
         else:
             df_my = pd.DataFrame(my_fleet)
             df_my["Supprimer"] = False
+            
+            # --- AJOUT DU RAPPEL DE SAUVEGARDE ICI ---
+            st.caption("❗ N'oubliez pas de cliquer sur ACTUALISER ci-dessous pour rendre les changements permanents.")
             
             col_kpi, col_toggle = st.columns([3, 1])
             show = col_toggle.toggle("Voir Valeur")
@@ -360,7 +445,7 @@ else:
             
             st.divider()
             
-            # 1. TABLEAU SYNTHÈSE
+            # 1. SYNTHÈSE
             st.markdown("### 📦 RÉSUMÉ DES STOCKS")
             summary_df = df_global.groupby(["Vaisseau", "Marque", "Rôle"]).agg(
                 Quantité=('Vaisseau', 'count'),
@@ -379,7 +464,7 @@ else:
             
             st.markdown("---")
 
-            # 2. TABLEAU DÉTAILLÉ
+            # 2. DÉTAIL
             st.markdown("### 📋 LISTE DÉTAILLÉE DES PILOTES")
             st.markdown("💡 *Sélectionnez une ligne pour voir le détail tactique*")
             
@@ -411,7 +496,6 @@ else:
 
             if selection.selection["rows"]:
                 idx = selection.selection["rows"][0]
-                # On récupère l'index réel depuis le DataFrame affiché
                 selected_row = display_df.iloc[idx]
                 
                 st.markdown("---")
