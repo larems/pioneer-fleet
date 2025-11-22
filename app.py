@@ -12,6 +12,18 @@ from ships_data import SHIPS_DB
 st.set_page_config(page_title="PIONEER COMMAND", layout="wide", page_icon="💠")
 BACKGROUND_IMAGE = "assets/fondecransite.png"
 
+# --- HIDE STREAMLIT STYLE (MODE APP PRO) ---
+hide_st_style = """
+<style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    [data-testid="stToolbar"] {visibility: hidden !important;}
+    .stApp > header {display: none;}
+</style>
+"""
+st.markdown(hide_st_style, unsafe_allow_html=True)
+
 # --- 2. GESTION DATABASE ---
 try:
     JSONBIN_ID = st.secrets["JSONBIN_ID"]
@@ -101,7 +113,7 @@ def process_fleet_updates(edited_df):
         time.sleep(1)
         st.rerun()
 
-# --- 4. CSS ---
+# --- 4. CSS GLOBAL ---
 bg_img_code = get_local_img_as_base64(BACKGROUND_IMAGE)
 
 st.markdown(f"""
@@ -124,6 +136,7 @@ st.markdown(f"""
     h1, h2, h3 {{ font-family: 'Orbitron', sans-serif !important; color: #e0e0e0 !important; text-transform: uppercase; letter-spacing: 1px; }}
     p, div, span, label, button {{ font-family: 'Rajdhani', sans-serif !important; color: #ccc; }}
 
+    /* Cards */
     .catalog-card {{
         background: rgba(20, 20, 20, 0.8); border: 1px solid #333; border-radius: 4px;
         overflow: hidden; margin-bottom: 15px; transition: transform 0.2s;
@@ -134,6 +147,7 @@ st.markdown(f"""
     .card-title {{ color: #fff; font-weight: bold; font-size: 0.85rem; margin: 0; }}
     .card-sub {{ font-size: 0.65rem; color: #888; text-transform: uppercase; }}
 
+    /* Buttons */
     div.stButton > button {{
         width: 100%; background: #0e1117; color: #ccc; border: 1px solid #444;
         border-radius: 0px; font-family: 'Rajdhani'; font-weight: bold; text-transform: uppercase;
@@ -142,6 +156,7 @@ st.markdown(f"""
     div.stButton > button[kind="primary"] {{ border: 1px solid #00d4ff; color: #00d4ff; }}
     div.stButton > button[kind="primary"]:hover {{ background: #00d4ff; color: #000; }}
 
+    /* Inputs */
     .stTextInput > div > div, .stSelectbox > div > div {{
         background-color: rgba(0, 0, 0, 0.6) !important; color: #fff !important;
         border: 1px solid #333 !important; border-radius: 0px !important;
@@ -276,7 +291,6 @@ else:
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
-                
                 if st.button("AJOUTER", key=f"add_{name}"):
                     add_ship_action(name, st.session_state.current_pilot)
 
@@ -333,14 +347,13 @@ else:
             # KPIs
             total_ships = len(df_global)
             total_dispo = len(df_global[df_global["Dispo"] == True])
-            total_value = df_global["Prix"].sum() # Calcul de la valeur totale
+            total_value = df_global["Prix"].sum()
             
-            # Ajout de la 4ème colonne pour le prix total
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("MEMBRES", len(st.session_state.db["users"]))
             c2.metric("FLOTTE", total_ships)
             c3.metric("OPÉRATIONNELS", total_dispo)
-            c4.metric("VALEUR GLOBALE", f"${total_value:,.0f}") # Affichage du prix
+            c4.metric("VALEUR GLOBALE", f"${total_value:,.0f}")
             
             st.divider()
             
@@ -355,7 +368,7 @@ else:
                 summary_df,
                 column_config={
                     "Quantité": st.column_config.ProgressColumn("Total", format="%d", min_value=0, max_value=int(summary_df["Quantité"].max())),
-                    "Dispo": st.column_config.NumberColumn("Prêtables", help="Nombre de vaisseaux marqués comme disponibles")
+                    "Dispo": st.column_config.NumberColumn("Prêtables")
                 },
                 use_container_width=True,
                 hide_index=True
