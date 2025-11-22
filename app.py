@@ -12,18 +12,6 @@ from ships_data import SHIPS_DB
 st.set_page_config(page_title="PIONEER COMMAND", layout="wide", page_icon="💠")
 BACKGROUND_IMAGE = "assets/fondecransite.png"
 
-# --- HIDE STREAMLIT STYLE (MODE APP PRO) ---
-hide_st_style = """
-<style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    [data-testid="stToolbar"] {visibility: hidden !important;}
-    .stApp > header {display: none;}
-</style>
-"""
-st.markdown(hide_st_style, unsafe_allow_html=True)
-
 # --- 2. GESTION DATABASE ---
 try:
     JSONBIN_ID = st.secrets["JSONBIN_ID"]
@@ -113,7 +101,7 @@ def process_fleet_updates(edited_df):
         time.sleep(1)
         st.rerun()
 
-# --- 4. CSS GLOBAL ---
+# --- 4. CSS ---
 bg_img_code = get_local_img_as_base64(BACKGROUND_IMAGE)
 
 st.markdown(f"""
@@ -136,7 +124,20 @@ st.markdown(f"""
     h1, h2, h3 {{ font-family: 'Orbitron', sans-serif !important; color: #e0e0e0 !important; text-transform: uppercase; letter-spacing: 1px; }}
     p, div, span, label, button {{ font-family: 'Rajdhani', sans-serif !important; color: #ccc; }}
 
-    /* Cards */
+    /* Animation Flèche */
+    @keyframes bounce {{
+        0%, 20%, 50%, 80%, 100% {{transform: translateX(0);}}
+        40% {{transform: translateX(10px);}}
+        60% {{transform: translateX(5px);}}
+    }}
+    .arrow-hint {{
+        font-size: 2em;
+        color: #00d4ff;
+        animation: bounce 2s infinite;
+        display: inline-block;
+        margin-right: 15px;
+    }}
+
     .catalog-card {{
         background: rgba(20, 20, 20, 0.8); border: 1px solid #333; border-radius: 4px;
         overflow: hidden; margin-bottom: 15px; transition: transform 0.2s;
@@ -147,7 +148,6 @@ st.markdown(f"""
     .card-title {{ color: #fff; font-weight: bold; font-size: 0.85rem; margin: 0; }}
     .card-sub {{ font-size: 0.65rem; color: #888; text-transform: uppercase; }}
 
-    /* Buttons */
     div.stButton > button {{
         width: 100%; background: #0e1117; color: #ccc; border: 1px solid #444;
         border-radius: 0px; font-family: 'Rajdhani'; font-weight: bold; text-transform: uppercase;
@@ -156,7 +156,6 @@ st.markdown(f"""
     div.stButton > button[kind="primary"] {{ border: 1px solid #00d4ff; color: #00d4ff; }}
     div.stButton > button[kind="primary"]:hover {{ background: #00d4ff; color: #000; }}
 
-    /* Inputs */
     .stTextInput > div > div, .stSelectbox > div > div {{
         background-color: rgba(0, 0, 0, 0.6) !important; color: #fff !important;
         border: 1px solid #333 !important; border-radius: 0px !important;
@@ -191,11 +190,12 @@ with st.sidebar:
     st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
     
     if not st.session_state.current_pilot:
-        st.caption("CONNEXION")
+        st.markdown("### 🔐 ZONE MEMBRE")
+        st.caption("Identifiez-vous pour accéder aux systèmes.")
         with st.form("auth_form"):
-            pseudo = st.text_input("ID")
-            pin = st.text_input("PIN", type="password", max_chars=4)
-            if st.form_submit_button("INITIALISER", type="primary"):
+            pseudo = st.text_input("IDENTIFIANT")
+            pin = st.text_input("CODE PIN (Création ou Login)", type="password", max_chars=4)
+            if st.form_submit_button("INITIALISER SYSTÈME", type="primary"):
                 st.session_state.db = load_db_from_cloud()
                 if pseudo and len(pin) == 4:
                     if pseudo in st.session_state.db["users"]:
@@ -203,15 +203,15 @@ with st.sidebar:
                             st.session_state.current_pilot = pseudo
                             st.rerun()
                         else:
-                            st.error("PIN Erroné")
+                            st.error("PIN Incorrect")
                     else:
                         st.session_state.db["users"][pseudo] = pin
                         save_db_to_cloud(st.session_state.db)
                         st.session_state.current_pilot = pseudo
-                        st.success("OK")
+                        st.success("Profil créé")
                         st.rerun()
                 else:
-                    st.error("Données invalides")
+                    st.error("Format invalide (PIN 4 chiffres)")
     else:
         st.markdown(f"<div style='color:#00d4ff; font-weight:bold; margin-bottom:10px;'>PILOTE: {st.session_state.current_pilot}</div>", unsafe_allow_html=True)
         
@@ -240,11 +240,18 @@ with st.sidebar:
 st.title("PIONEER ORG COMMAND")
 
 if not st.session_state.current_pilot:
-    st.markdown("<br><br>", unsafe_allow_html=True)
+    # --- ECRAN D'ACCUEIL CORRIGE ---
+    st.markdown("<br><br><br>", unsafe_allow_html=True)
     st.markdown("""
-    <div style="text-align: center; padding: 40px; background: rgba(20, 20, 20, 0.8); border-top: 2px solid #ff4b4b; border-bottom: 2px solid #ff4b4b;">
-        <h2 style="color: #ff4b4b !important; font-size: 1.8em;">SYSTÈME VERROUILLÉ</h2>
-        <p style="color: #aaa; letter-spacing: 1px; margin-top: 10px;">IDENTIFICATION REQUISE POUR ACCÈS AUX DONNÉES LOGISTIQUES.</p>
+    <div style="text-align: center; padding: 40px; background: rgba(10, 10, 10, 0.85); border: 1px solid #333; border-radius: 10px;">
+        <h2 style="color: #fff !important; margin-bottom:20px;">BIENVENUE SUR LE TERMINAL</h2>
+        <div style="display: flex; align-items: center; justify-content: center; gap: 20px;">
+            <div class="arrow-hint">⬅</div>
+            <div style="text-align: left;">
+                <h3 style="color: #00d4ff !important; margin: 0;">IDENTIFICATION REQUISE</h3>
+                <p style="color: #888; margin: 0;">Utilisez le panneau latéral gauche pour vous connecter.</p>
+            </div>
+        </div>
     </div>
     """, unsafe_allow_html=True)
 else:
@@ -291,6 +298,7 @@ else:
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
+                
                 if st.button("AJOUTER", key=f"add_{name}"):
                     add_ship_action(name, st.session_state.current_pilot)
 
@@ -357,7 +365,7 @@ else:
             
             st.divider()
             
-            # 1. TABLEAU SYNTHÈSE
+            # 1. SYNTHÈSE
             st.markdown("### 📦 RÉSUMÉ DES STOCKS")
             summary_df = df_global.groupby(["Vaisseau", "Marque", "Rôle"]).agg(
                 Quantité=('Vaisseau', 'count'),
@@ -376,7 +384,7 @@ else:
             
             st.markdown("---")
 
-            # 2. TABLEAU DÉTAILLÉ
+            # 2. DÉTAIL
             st.markdown("### 📋 LISTE DÉTAILLÉE DES PILOTES")
             st.markdown("💡 *Sélectionnez une ligne pour voir le détail tactique*")
             
