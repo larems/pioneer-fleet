@@ -721,7 +721,7 @@ def catalogue_page():
             st.markdown(f"**CREW MAX :** <span style='color:#FFF;'>{crew_max}</span>", unsafe_allow_html=True)
 
             price_value = f"${info.get('price', 0):,.0f} USD (Valeur)" if st.session_state.selected_source == "STORE" else f"{info.get('auec_price', 0):,.0f} aUEC (Coût)"
-            st.markdown(f"<h4 style='{price_style}'>ENREGISTREMENT : {price_value}</h4>", unsafe_allow_html=True)
+            st.markdown(f"<h4 style='color:#30E8FF;'>ENREGISTREMENT : {price_value}</h4>", unsafe_allow_html=True)
 
             if st.session_state.current_pilot:
                 if st.button(f"✅ ENREGISTRER {selected_name} DANS MON HANGAR", type="primary", use_container_width=True):
@@ -1209,7 +1209,7 @@ def corpo_fleet_page():
 
 
     # 1. Regrouper les lignes pour la LISTE DÉTAILLÉE (Regrouper par Modèle, Classification, et Source - Ignorer l'Assurance pour la fusion)
-    # FIX: Regroupement sur les colonnes Vaisseau, Rôle, Source.
+    # FIX: Le regroupement se fait par Vaisseau, Marque, Rôle, Source. L'Assurance est ensuite agrégée.
     detail_data = display_df.groupby(['Vaisseau', 'Marque', 'Rôle', 'Source']).agg(
         Pilotes=('Propriétaire', lambda x: ', '.join(sorted(x.unique()))), # JOINDRE LES PILOTES
         Assurance=('Assurance', lambda x: ', '.join(sorted(x.unique()))), # JOINDRE LES ASSURANCES
@@ -1449,7 +1449,6 @@ def corpo_fleet_page():
 
 
     # 1. Regrouper les lignes pour la LISTE DÉTAILLÉE (Regrouper par Modèle, Classification, et Source - Ignorer l'Assurance pour la fusion)
-    # FIX: Le regroupement se fait par Vaisseau, Marque, Rôle, Source. L'Assurance est ensuite agrégée.
     detail_data = display_df.groupby(['Vaisseau', 'Marque', 'Rôle', 'Source']).agg(
         Pilotes=('Propriétaire', lambda x: ', '.join(sorted(x.unique()))), # JOINDRE LES PILOTES
         Assurance=('Assurance', lambda x: ', '.join(sorted(x.unique()))), # JOINDRE LES ASSURANCES
@@ -1464,11 +1463,11 @@ def corpo_fleet_page():
     display_for_table['Modèle'] = detail_data['Vaisseau']
     display_for_table['Classification'] = detail_data['Rôle']
     display_for_table['Source'] = detail_data['Source']
-    display_for_table['Assurance'] = detail_data['Assurance'] # Liste des assurances fusionnées
+    display_for_table['Assurance'] = detail_data['Assurance'] 
     display_for_table['Crew Max'] = detail_data['Crew_Max']
     display_for_table['NB Ex.'] = detail_data['Quantité']
     
-    # FIX: Régénérer la Base64 en utilisant la colonne 'Image' (chemin local)
+    # Régénérer la Base64 en utilisant la colonne 'Image' (chemin local)
     display_for_table['Visuel'] = detail_data['Image'].apply(get_local_img_as_base64)
     
     # Calculer le Prix Affiché (du modèle)
