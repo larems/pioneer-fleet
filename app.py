@@ -77,7 +77,7 @@ def load_db_from_cloud():
     """Charge la base de données depuis JSONBin.io."""
     if not JSONBIN_KEY:
         st.warning(
-            "⚠️ Clé JSONBIN.io (MASTER_KEY) manquante. Utilisation d'une base de données locale temporaire."
+            "⚠️ Clé JSONBin.io (MASTER_KEY) manquante. Utilisation d'une base de données locale temporaire."
         )
         return {"users": {}, "fleet": []}
 
@@ -423,7 +423,7 @@ p, div, span, label, .stMarkdown, .stText {{
     border-radius: 3px;
     background: rgba(0, 0, 0, 0.6);
     border: 1px solid rgba(255, 255, 255, 0.12);
-    color: #e0e8f0;
+    color: #e0e0e0;
 }}
 .card-info {{
     padding: 10px 16px 12px 16px;
@@ -529,7 +529,6 @@ def render_sidebar():
 
             if st.button("DÉCONNEXION", use_container_width=True):
                 st.session_state.current_pilot = None
-                st.session_state.session_log = []
                 st.session_state.menu_nav = "CATALOGUE"
                 st.rerun()
 
@@ -722,7 +721,7 @@ def catalogue_page():
             st.markdown(f"**CREW MAX :** <span style='color:#FFF;'>{crew_max}</span>", unsafe_allow_html=True)
 
             price_value = f"${info.get('price', 0):,.0f} USD (Valeur)" if st.session_state.selected_source == "STORE" else f"{info.get('auec_price', 0):,.0f} aUEC (Coût)"
-            st.markdown(f"<h4 style='color:#30E8FF;'>ENREGISTREMENT : {price_value}</h4>", unsafe_allow_html=True)
+            st.markdown(f"<h4 style='{price_style}'>ENREGISTREMENT : {price_value}</h4>", unsafe_allow_html=True)
 
             if st.session_state.current_pilot:
                 if st.button(f"✅ ENREGISTRER {selected_name} DANS MON HANGAR", type="primary", use_container_width=True):
@@ -1210,10 +1209,11 @@ def corpo_fleet_page():
 
 
     # 1. Regrouper les lignes pour la LISTE DÉTAILLÉE (Regrouper par Modèle, Classification, et Source - Ignorer l'Assurance pour la fusion)
+    # FIX: Regroupement sur les colonnes Vaisseau, Rôle, Source.
     detail_data = display_df.groupby(['Vaisseau', 'Marque', 'Rôle', 'Source']).agg(
-        Pilotes=('Propriétaire', lambda x: ', '.join(sorted(x.unique()))), # JOINDRE LES PILOTES
+        Pilotes=('Propriétaire', lambda x: ', '.join(sorted(x.unique()))), 
         Assurance=('Assurance', lambda x: ', '.join(sorted(x.unique()))), # JOINDRE LES ASSURANCES
-        Quantité=('Vaisseau', 'count'), # Nombre de ships par ligne
+        Quantité=('Vaisseau', 'count'), 
         Crew_Max=('Crew_Max_Catalog', 'first'),
         Image=('Image', 'first'),
     ).reset_index()
@@ -1224,7 +1224,7 @@ def corpo_fleet_page():
     display_for_table['Modèle'] = detail_data['Vaisseau']
     display_for_table['Classification'] = detail_data['Rôle']
     display_for_table['Source'] = detail_data['Source']
-    display_for_table['Assurance'] = detail_data['Assurance'] # Liste des assurances fusionnées
+    display_for_table['Assurance'] = detail_data['Assurance'] 
     display_for_table['Crew Max'] = detail_data['Crew_Max']
     display_for_table['NB Ex.'] = detail_data['Quantité']
     
@@ -1233,15 +1233,14 @@ def corpo_fleet_page():
     
     # Calculer le Prix Affiché (du modèle)
     def calculate_aggregated_price(row):
-        info = SHIPS_DB.get(row['Modèle'])
+        ship_name = row['Modèle']
+        source = row['Source']
+        
+        info = SHIPS_DB.get(ship_name)
         if not info:
-            # Tente de trouver un prix INGAME si le modèle n'est pas dans le catalogue (cas Rare)
-            ingame_price = df_global[df_global['Vaisseau'] == row['Modèle']]['Prix_aUEC'].max()
-            if ingame_price > 0:
-                return f"{ingame_price:,.0f} aUEC"
             return "N/A"
             
-        if row['Source'] == 'STORE':
+        if source == 'STORE':
             return f"${info.get('price', 0):,.0f} USD"
         else:
             return f"{info.get('auec_price', 0):,.0f} aUEC"
@@ -1249,7 +1248,7 @@ def corpo_fleet_page():
 
     display_for_table['Prix'] = display_for_table.apply(calculate_aggregated_price, axis=1)
     
-    # 4. Afficher le tableau final
+    # 3. Afficher le tableau final
     st.dataframe(
         display_for_table,
         column_config={
