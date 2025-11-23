@@ -140,7 +140,7 @@ def get_local_img_as_base64(path):
             return f"data:{mime_type};base64,{encoded}"
         except Exception:
             pass
-    # fallback
+    # fallback (le SVG est correct, il est juste long)
     return (
         "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDov"
         "L3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4MDAiIGhlaWdo"
@@ -224,47 +224,13 @@ def add_ship_action():
         st.rerun()
 
 
-def refresh_prices_from_catalog(source_type: str):
-    """
-    Met à jour les prix dans la flotte à partir de SHIPS_DB et force la sauvegarde.
-    source_type: "STORE" ou "INGAME"
-    """
-    db = st.session_state.db
-    updated = False
-
-    for ship in db.get("fleet", []):
-        ship_name = ship.get("Vaisseau")
-        source = ship.get("Source")
-        info = SHIPS_DB.get(ship_name)
-
-        if not info:
-            continue
-
-        if source_type == "STORE" and source == "STORE":
-            new_price = float(info.get("price", 0.0) or 0)
-            if float(ship.get("Prix_USD", 0) or 0) != new_price:
-                ship["Prix_USD"] = new_price
-                updated = True
-
-        if source_type == "INGAME" and source == "INGAME":
-            new_price = float(info.get("auec_price", 0.0) or 0)
-            if float(ship.get("Prix_aUEC", 0) or 0) != new_price:
-                ship["Prix_aUEC"] = new_price
-                updated = True
-
-    if updated:
-        db = normalize_db_schema(db)
-        if save_db_to_cloud(db):
-            st.session_state.db = db
-            st.success(f"✅ Prix {source_type} mis à jour à partir du catalogue vaisseaux.")
-        else:
-            st.error("❌ Erreur lors de la sauvegarde après la mise à jour des prix.")
-
-    st.rerun() # Rerun forcer pour rafraîchir l'affichage
-
-
 def process_fleet_updates(edited_df: pd.DataFrame):
-    """Met à jour les entrées de la flotte (disponibilité, suppression, assurance) et sauvegarde."""
+    """
+    Met à jour les entrées de la flotte (disponibilité, suppression, assurance) et sauvegarde.
+    
+    Cette version est plus directe et utilise 'id' pour tracer les modifications
+    dans la liste 'fleet' de la DB, qui est le format que l'on sauvegarde.
+    """
     if edited_df.empty:
         st.info("Aucune modification à synchroniser.")
         return
@@ -273,33 +239,47 @@ def process_fleet_updates(edited_df: pd.DataFrame):
     current_fleet = current_db["fleet"]
     needs_save = False
 
-    # Suppression
+    # 1. Identifier les IDs à supprimer
     if "Supprimer" in edited_df.columns:
+        # On prend uniquement les lignes du DataFrame édité où 'Supprimer' est True
         ids_to_delete = edited_df[edited_df["Supprimer"] == True]["id"].tolist()
     else:
         ids_to_delete = []
 
+    # 2. Effectuer les suppressions
     if ids_to_delete:
+        # Filtrer la liste 'fleet' pour exclure les vaisseaux dont l'ID est dans ids_to_delete
         current_fleet[:] = [
             s for s in current_fleet if s.get("id") not in ids_to_delete
         ]
         needs_save = True
         st.toast(f"🗑️ {len(ids_to_delete)} vaisseaux supprimés.", icon="🗑️")
 
-    # Mise à jour dispo / assurance
-    update_df = edited_df[~edited_df["id"].isin(ids_to_delete)].copy()
-    if not update_df.empty:
-        for ship in current_fleet:
-            sid = ship.get("id")
-            row = update_df[update_df["id"] == sid]
-            if not row.empty:
-                row = row.iloc[0]
-                if "Dispo" in row and ship["Dispo"] != row["Dispo"]:
-                    ship["Dispo"] = bool(row["Dispo"])
-                    needs_save = True
-                if "Assurance" in row and ship.get("Assurance") != row["Assurance"]:
-                    ship["Assurance"] = row["Assurance"]
-                    needs_save = True
+    # 3. Mettre à jour les autres champs (Dispo / Assurance)
+    # Les modifications sont dans edited_df, y compris celles qui n'ont pas été supprimées.
+    
+    # Créer un dictionnaire de mapping ID -> modifications pour les mises à jour
+    # On itère sur le DataFrame édité D'ORIGINE (avant les suppressions dans current_fleet)
+    update_map = edited_df.set_index("id")[["Dispo", "Assurance"]].to_dict("index")
+
+    # On parcourt la flotte actuelle (déjà nettoyée des suppressions)
+    for ship in current_fleet:
+        ship_id = ship.get("id")
+        
+        # Si l'ID du vaisseau est dans la map d'update (il a été édité ou est un survivant)
+        if ship_id in update_map:
+            row = update_map[ship_id]
+            
+            # Mise à jour de 'Dispo'
+            if "Dispo" in row and ship["Dispo"] != bool(row["Dispo"]):
+                ship["Dispo"] = bool(row["Dispo"])
+                needs_save = True
+                
+            # Mise à jour de 'Assurance'
+            if "Assurance" in row and ship.get("Assurance") != row["Assurance"]:
+                ship["Assurance"] = row["Assurance"]
+                needs_save = True
+
 
     if needs_save:
         current_db = normalize_db_schema(current_db)
@@ -939,6 +919,9 @@ def my_hangar_page():
 
     if not my_fleet:
         st.info("Hangar vide. Ajoutez des vaisseaux depuis le CATALOGUE.")
+        # Afficher la section d'acquisition même si le hangar est vide
+        render_acquisition_tracking(current_auec_balance, final_target_name)
+        return
     else:
         df_my = pd.DataFrame(my_fleet)
         df_my["Supprimer"] = False
@@ -947,8 +930,10 @@ def my_hangar_page():
             st.error(
                 "Données de flotte incomplètes (colonne 'Source' manquante). "
             )
+            render_acquisition_tracking(current_auec_balance, final_target_name)
             return
 
+        # S'assurer que l'ID est bien dans le DataFrame pour le suivi
         if "id" not in df_my.columns:
             df_my["id"] = range(1, len(df_my) + 1)
         df_my["id"] = df_my["id"].astype(int)
@@ -957,7 +942,7 @@ def my_hangar_page():
         df_my["Prix_USD"] = pd.to_numeric(df_my["Prix_USD"], errors="coerce").fillna(0)
         df_my["Prix_aUEC"] = pd.to_numeric(df_my["Prix_aUEC"], errors="coerce").fillna(0)
 
-        # Colonnes nécessaires mais masquées
+        # Colonnes nécessaires pour la sauvegarde mais invisibles
         columns_internal = ["id", "Image", "Propriétaire", "Prix_USD", "Prix_aUEC", "Prix"]
         
         # 1. Calcul de la colonne de prix unique pour l'affichage
@@ -974,6 +959,7 @@ def my_hangar_page():
 
         # Colonnes visibles dans l'ordre souhaité
         columns_for_display = [
+            "id", # Temporairement visible pour la fusion
             "Vaisseau", 
             "Marque", 
             "Rôle", 
@@ -987,6 +973,11 @@ def my_hangar_page():
         
         # Configuration des colonnes affichées pour n'inclure que la colonne unique de prix
         editable_columns_base = {
+            "id": st.column_config.Column(
+                "ID",
+                disabled=True,
+                width="small"
+            ),
             "Dispo": st.column_config.CheckboxColumn("OPÉRATIONNEL ?", width="small"),
             "Supprimer": st.column_config.CheckboxColumn("SUPPRIMER", width="small"),
             "Visuel": st.column_config.ImageColumn("APERÇU", width="small"),
@@ -998,7 +989,20 @@ def my_hangar_page():
             ),
             # Colonne Prix_Acquisition affichée comme texte pour garder le formatage monétaire unique
             "Prix_Acquisition": st.column_config.TextColumn("PRIX", width="small"),
+            "Vaisseau": st.column_config.TextColumn("Vaisseau", width="medium"),
+            "Marque": st.column_config.TextColumn("Marque", width="small"),
+            "Rôle": st.column_config.TextColumn("Rôle", width="small"),
         }
+        
+        # Colonnes à désactiver dans l'éditeur (sauf les champs modifiables)
+        disabled_cols = [
+            "Vaisseau",
+            "Marque",
+            "Rôle",
+            "Visuel",
+            "Source",
+            "Prix_Acquisition",
+        ]
         
         # --- HANGAR STORE ---
         df_store = df_my[df_my["Source"] == "STORE"].reset_index(drop=True).copy()
@@ -1018,31 +1022,17 @@ def my_hangar_page():
             
             st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) 
 
-            edited_store_display = st.data_editor(
+            edited_store = st.data_editor(
                 df_store_display,
                 column_config=editable_columns_base,
-                disabled=[
-                    "Vaisseau",
-                    "Marque",
-                    "Rôle",
-                    "Visuel",
-                    "Source",
-                    "Prix_Acquisition",
-                ],
+                disabled=disabled_cols,
                 hide_index=True,
                 use_container_width=True,
                 key="store_hangar_editor",
             )
-            
-            # Conserver les colonnes internes pour la sauvegarde
-            edited_store = edited_store_display.copy()
-            edited_store["id"] = df_store["id"]
-            edited_store["Prix_USD"] = df_store["Prix_USD"]
-            edited_store["Prix_aUEC"] = df_store["Prix_aUEC"]
-            
         else:
             st.info("Aucun vaisseau provenant du Store dans votre hangar.")
-            edited_store = pd.DataFrame()
+            edited_store = pd.DataFrame(columns=columns_for_display)
 
         st.markdown("---")
 
@@ -1064,34 +1054,21 @@ def my_hangar_page():
             
             st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) 
 
-            edited_ingame_display = st.data_editor(
+            edited_ingame = st.data_editor(
                 df_ingame_display,
                 column_config=editable_columns_base,
-                disabled=[
-                    "Vaisseau",
-                    "Marque",
-                    "Rôle",
-                    "Visuel",
-                    "Source",
-                    "Prix_Acquisition",
-                ],
+                disabled=disabled_cols,
                 hide_index=True,
                 use_container_width=True,
                 key="ingame_hangar_editor",
             )
-            
-            # Conserver les colonnes internes pour la sauvegarde
-            edited_ingame = edited_ingame_display.copy()
-            edited_ingame["id"] = df_ingame["id"]
-            edited_ingame["Prix_USD"] = df_ingame["Prix_USD"]
-            edited_ingame["Prix_aUEC"] = df_ingame["Prix_aUEC"]
-            
         else:
             st.info("Aucun vaisseau acheté en jeu dans votre hangar.")
-            edited_ingame = pd.DataFrame()
+            edited_ingame = pd.DataFrame(columns=columns_for_display)
 
         # --- SAUVEGARDE GLOBALE DES VAISSEAUX POSSÉDÉS ---
         st.markdown("---")
+        # Concaténer les DataFrames édités (Store et Ingame)
         combined_edited = pd.concat([edited_store, edited_ingame], ignore_index=True)
 
         if st.button(
@@ -1100,6 +1077,8 @@ def my_hangar_page():
             use_container_width=True,
         ):
             if not combined_edited.empty:
+                # La fonction process_fleet_updates va utiliser le 'id'
+                # présent dans le DataFrame édité pour retrouver et modifier/supprimer
                 process_fleet_updates(combined_edited)
             else:
                 st.info("Aucune modification significative à enregistrer.")
@@ -1108,6 +1087,10 @@ def my_hangar_page():
     # -------------------------------------------------------------
     # --- ZONE : SUIVI D'ACQUISITION FUTURE (DÉPLACÉE EN BAS) ---
     # -------------------------------------------------------------
+    render_acquisition_tracking(current_auec_balance, final_target_name)
+
+def render_acquisition_tracking(current_auec_balance, final_target_name):
+    """Render the acquisition tracking section, used by my_hangar_page."""
     st.markdown("---") # Séparateur visuel
     st.markdown("## 🎯 SUIVI D'ACQUISITION FUTURE (aUEC)")
     
@@ -1140,7 +1123,6 @@ def my_hangar_page():
                 key="hangar_target_select_form",
             )
             
-        col_save, col_delete = st.columns([1, 1])
         
         submitted = st.form_submit_button("💾 ENREGISTRER MON SOLDE / OBJECTIF", type="primary")
 
