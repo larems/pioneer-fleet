@@ -3,7 +3,8 @@ import json
 from typing import Dict, Any
 
 # --- 1. BASE DE CONNAISSANCE EXISTANTE (Prix, Rôle, Image locale, etc.) ---
-# Cette structure de données provient de votre ancien script auto-généré.
+# Ces données sont la source de vérité pour le prix USD, le rôle et le chemin de l'image.
+# Elles seront fusionnées avec les specs de scrap.json.
 BASE_CATALOG_DATA = {
     "100i": {"price": 50, "role": "Starter Luxe", "brand": "Origin", "ingame": True, "auec_price": 700000, "img": "assets/100i.webp", "crew_max": 1},
     "125a": {"price": 60, "role": "Combat Léger", "brand": "Origin", "ingame": True, "auec_price": 800000, "img": "assets/125a.webp", "crew_max": 1},
@@ -248,51 +249,26 @@ BASE_CATALOG_DATA = {
     "Zeus Mk II MR": {"price": 160, "role": "Combat", "brand": "RSI", "ingame": False, "auec_price": 0, "img": "assets/zeus mk ii mr.webp", "crew_max": 2},
 }
 
-# --- 2. FONCTION DE CHARGEMENT ET DE FUSION DU CATALOGUE COMPLET ---
+
+# --- 2. FONCTIONS DE FUSION ET DE NETTOYAGE DES DONNÉES ---
 
 def clean_name(name: str) -> str:
     """Nettoie et normalise le nom du vaisseau pour la clé de fusion."""
-    # Enlève les variations d'édition et les mots inutiles pour matcher les clés de BASE_CATALOG_DATA
     name = name.lower()
-    name = name.replace("best in show edition 2949", "")
-    name = name.replace("expedition w/c8x", "w c8x")
-    name = name.replace("expedition", "")
-    name = name.replace("pirate edition", "")
-    name = name.replace("utility", "")
-    name = name.replace("emerald", "")
-    name = name.replace("solstice", "")
-    name = name.replace("vindicator", "")
-    name = name.replace("firebird", "")
-    name = name.replace("peregrine", "")
-    name = name.replace("raven", "")
-    name = name.replace("comet", "")
-    name = name.replace("talus", "")
-    name = name.replace("carbon", "")
-    name = name.replace("force", "")
-    name = name.replace("velocity", "")
-    name = name.replace("lx", "")
-    name = name.replace("mx", "")
-    name = name.replace("aa", "")
-    name = name.replace("mt", "")
-    name = name.replace("rc", "")
-    name = name.replace("rn", "")
-    name = name.replace("tr", "")
-    name = name.replace("ds", "")
-    name = name.replace("cl", "")
-    name = name.replace("es", "")
-    name = name.replace("mr", "")
-    name = name.replace("ln", "")
-    name = name.replace("atls geo", "atls") # Corrige le ATLS GEO -> ATLS
-    name = name.replace("g12r", "g12") # Corrige G12r -> G12
-    name = name.replace("g12a", "g12") # Corrige G12a -> G12
-    name = name.replace("mko", "mako") # Correction Reliant Mako
-    name = name.replace("sen", "sen") # Correction Reliant Sen
-    name = name.replace("kue", "")
-    name = name.replace("l-21 wolf", "l 21 wolf")
-    name = name.replace("p-52 merlin", "p 52 merlin")
-    name = name.replace("p-72 archimedes", "p 72 archimedes")
-    
-    # Remplacer les tirets/points par des espaces et enlever les espaces multiples/en début/fin
+    replacements = {
+        "best in show edition 2949": "", "expedition w/c8x": "w c8x", "expedition": "", 
+        "pirate edition": "", "utility": "", "emerald": "", "solstice": "", 
+        "vindicator": "", "firebird": "", "peregrine": "", "raven": "", 
+        "comet": "", "talus": "", "carbon": "", "force": "", "velocity": "",
+        "lx": "", "mx": "", "aa": "", "mt": "", "rc": "", "rn": "", "tr": "", 
+        "ds": "", "cl": "", "es": "", "mr": "", "ln": "", "g12r": "g12", 
+        "g12a": "g12", "kue": "", "l-21 wolf": "l 21 wolf", 
+        "p-52 merlin": "p 52 merlin", "p-72 archimedes": "p 72 archimedes",
+        "atls geo": "atls"
+    }
+    for old, new in replacements.items():
+        name = name.replace(old, new)
+        
     name = name.replace("-", " ").replace(".", " ").strip()
     return " ".join(name.split())
 
@@ -300,10 +276,9 @@ def clean_name(name: str) -> str:
 def load_and_merge_ships_data(catalog_data: Dict[str, Any], json_path: str = "scrap.json") -> Dict[str, Any]:
     """
     Charge les données de scrap.json et les fusionne avec la base de données du catalogue.
-    Les clés de scrap.json sont les nouvelles spécifications (longueur, masse, cargo, etc.).
     """
     
-    # 1. Charger les données du fichier JSON de votre ami
+    # 1. Charger les données du fichier JSON
     try:
         with open(json_path, 'r', encoding='utf-8') as f:
             scrap_data_list = json.load(f)
@@ -314,68 +289,59 @@ def load_and_merge_ships_data(catalog_data: Dict[str, Any], json_path: str = "sc
         print(f"❌ Erreur de décodage JSON dans {json_path}. Vérifiez la syntaxe du fichier.")
         return catalog_data
     
-    # 2. Convertir la liste JSON en dictionnaire pour une recherche rapide,
-    # en utilisant une version normalisée du 'title' comme clé.
+    # 2. Convertir le JSON en dictionnaire de spécifications
     scrap_db = {}
     for entry in scrap_data_list:
         try:
             raw_title = entry["ship"]["title"]["title"]
-            # Nettoyer le titre pour qu'il corresponde aux clés de BASE_CATALOG_DATA
             normalized_key = clean_name(raw_title)
             
-            # Ne garder que les spécifications techniques pertinentes
             specs = entry["ship"]["specification"]
             
-            # Normaliser les noms des clés pour l'affichage (optionnel mais propre)
+            # Nettoyage des clés de spécification
             specs_clean = {k.replace('_', ' ').title().replace('M/S/S', 'm/s²').replace('M/S', 'm/s').replace('Kg', 'kg').replace('M', 'm'): v for k, v in specs.items()}
             
-            # Remplacer le "Min Crew" et "Max Crew" du scrap.json (texte) par le crew_max du catalogue (nombre)
-            # pour éviter les conflits dans le code existant qui utilise 'crew_max'.
+            # Retirer les champs d'équipage pour ne garder que celui de BASE_CATALOG_DATA
             specs_clean.pop("Min Crew", None)
             specs_clean.pop("Max Crew", None)
             
-            # Ajouter le titre original non nettoyé pour référence
             specs_clean["Titre Original Scrap"] = raw_title
             
             scrap_db[normalized_key] = specs_clean
             
-        except KeyError as e:
-            # Ignorer les entrées mal formées dans le scrap.json
-            print(f"⚠️ Entrée ignorée dans {json_path} : Clé manquante: {e}")
+        except KeyError:
             continue
 
-    # 3. Fusionner les données : parcourir le catalogue existant et ajouter les spécifications.
+    # 3. Fusionner les données et appliquer les corrections
     final_ships_db = {}
     match_count = 0
     
     for name, data in catalog_data.items():
-        # L'entrée du catalogue est notre base
         final_data = data.copy()
         
-        # Le nom affiché dans le catalogue est la clé que nous devons matcher
+        # Tenter la fusion avec les données de scrap.json
         normalized_key = clean_name(name)
-        
-        # Rechercher les spécifications dans la base du fichier de votre ami
         specs = scrap_db.get(normalized_key)
         
         if specs:
-            # Fusion si un match est trouvé
             final_data.update(specs)
             match_count += 1
-        
-        # Stocker le résultat dans la DB finale
+            
+        # --- CORRECTION DEMANDÉE: Remplacer auec_price=0 par un statut (Post-Fusion) ---
+        if not final_data.get("ingame", False) or final_data.get("auec_price") == 0:
+            final_data["auec_price"] = "Pas disponible à la vente"
+            final_data["ingame"] = False # S'assurer que le flag reste cohérent
+
         final_ships_db[name] = final_data
 
-    # Log de l'opération
-    print(f"\n--- Fusion de Données ---")
-    print(f"Catalogue initial (ships_data.py) : {len(catalog_data)} vaisseaux")
-    print(f"Données de spécifications (scrap.json) : {len(scrap_db)} entrées uniques")
-    print(f"✅ {match_count} correspondances trouvées et fusionnées.")
+    # Log pour info
+    print(f"\n--- Fusion & Nettoyage de Données ---")
+    print(f"Catalogue initial : {len(catalog_data)} vaisseaux")
+    print(f"Spécifications fusionnées : {match_count} entrées")
     print(f"Catalogue final (SHIPS_DB) : {len(final_ships_db)} vaisseaux.")
     print("---")
     
     return final_ships_db
 
 # --- 3. EXÉCUTION DE LA FUSION ET EXPORTATION DE LA CONSTANTE FINALE ---
-# Cette constante sera importée par app.py
 SHIPS_DB = load_and_merge_ships_data(BASE_CATALOG_DATA, "scrap.json")
