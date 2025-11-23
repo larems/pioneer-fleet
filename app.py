@@ -5,7 +5,7 @@ import base64
 import os
 import requests
 import time
-from ships_data import SHIPS_DB
+from ships_data import SHIPS_DB # Assurez-vous que ships_data.py est valide pour cet import
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(
@@ -16,8 +16,9 @@ st.set_page_config(
 BACKGROUND_IMAGE = "assets/fondecransite.png"
 
 # --- 2. GESTION DATABASE (JSONBIN.IO) ---
-JSONBIN_ID = st.secrets.get("JSONBIN_ID", "6921f0ded0ea881f40f9933f")
-JSONBIN_KEY = st.secrets.get("JSONBIN_KEY", "")
+# NOTE: Remplacer les secrets par vos valeurs réelles si nécessaire
+JSONBIN_ID = "6921f0ded0ea881f40f9933f" 
+JSONBIN_KEY = "" # Remplacer par st.secrets.get("JSONBIN_KEY", "") en production
 
 
 def normalize_db_schema(db: dict) -> dict:
@@ -70,7 +71,6 @@ def normalize_db_schema(db: dict) -> dict:
             if ship.get("Source") == "STORE" and float(ship.get("Prix_USD", 0) or 0) == 0:
                 ship["Prix_USD"] = legacy_price_clean
             
-            # Ne pas écraser les chaînes descriptives
             current_auec_price = ship.get("Prix_aUEC")
             if ship.get("Source") == "INGAME" and isinstance(current_auec_price, (int, float)) and current_auec_price == 0:
                  ship["Prix_aUEC"] = legacy_price_clean
@@ -86,13 +86,16 @@ def normalize_db_schema(db: dict) -> dict:
 def load_db_from_cloud():
     """Charge la base de données depuis JSONBin.io."""
     if not JSONBIN_KEY:
+        # Utilise l'ID statique si la clé est manquante, pour le mode de développement
+        url = f"https://api.jsonbin.io/v3/b/{JSONBIN_ID}/latest"
+        headers = {} 
         st.warning(
-            "⚠️ Clé JSONBin.io (MASTER_KEY) manquante. Utilisation d'une base de données locale temporaire."
+            "⚠️ Clé JSONBin.io (MASTER_KEY) manquante. Lecture de la DB seulement (pas de sauvegarde/suppression)."
         )
-        return {"users": {}, "fleet": []}
+    else:
+        url = f"https://api.jsonbin.io/v3/b/{JSONBIN_ID}/latest"
+        headers = {"X-Master-Key": JSONBIN_KEY}
 
-    url = f"https://api.jsonbin.io/v3/b/{JSONBIN_ID}/latest"
-    headers = {"X-Master-Key": JSONBIN_KEY}
     try:
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 200:
@@ -117,19 +120,16 @@ def save_db_to_cloud(data):
 
     try:
         response = requests.put(url, json=data, headers=headers, timeout=10)
-        # FIX: Tolérer le statut 403 (JSONBin.io limite 100KB)
         if response.status_code not in (200, 204, 403): 
-            # Si le statut est autre que succès (200/204) ou l'erreur signalée (403), on affiche l'erreur.
             st.error(f"Erreur de sauvegarde DB: Statut {response.status_code}. Vérifiez votre clé JSONBin.io.")
             return False
         if response.status_code == 403:
-            st.warning("⚠️ Limite de 100KB JSONBin atteinte. Sauvegarde des données minimales seulement.")
+            st.warning("⚠️ Limite de 100KB JSONBin atteinte. Sauvegarde des données minimale seulement.")
             return True 
     except requests.exceptions.RequestException as e:
         st.error(f"Erreur réseau/timeout lors de la sauvegarde: {e}")
         return False
 
-    # Clear cache de la fonction de chargement
     load_db_from_cloud.clear()
     return True
 
@@ -156,7 +156,6 @@ def get_local_img_as_base64(path):
             return f"data:{mime_type};base64,{encoded}"
         except Exception:
             pass
-    # FIX: Remplacer le SVG potentiellement invalide par une chaîne vide pour éviter les crashs précoces
     return "" 
 
 
@@ -182,15 +181,11 @@ def add_ship_action():
         return
 
     info = SHIPS_DB[ship_name]
-    # Utilisation du temps en millisecondes pour un ID unique (même si le nom est le même)
     new_id = int(time.time() * 1_000_000) 
 
     price_usd = info.get("price", 0.0)
-    
-    # Récupérer la valeur aUEC (peut être un nombre ou une chaîne)
     price_aUEC_raw = info.get("auec_price", 0)
     
-    # On stocke le prix aUEC en chaîne (si c'est une chaîne) ou en float (si c'est un nombre)
     if isinstance(price_aUEC_raw, str):
         price_aUEC = price_aUEC_raw
     else:
@@ -204,11 +199,11 @@ def add_ship_action():
         "Marque": info.get("brand", "N/A"),
         "Rôle": info.get("role", "Inconnu"),
         "Dispo": False,
-        "Image": info.get("img", ""), # Chemin local du fichier, stocké dans la DB
-        "Visuel": "", # TRÈS IMPORTANT : Stocker vide pour ne pas dépasser 100KB
+        "Image": info.get("img", ""),
+        "Visuel": "",
         "Source": source,
         "Prix_USD": float(price_usd or 0),
-        "Prix_aUEC": price_aUEC, # Stockage de la valeur brute (numéro ou chaîne)
+        "Prix_aUEC": price_aUEC,
         "Assurance": insurance,
         "Prix": None, 
         "crew_max": info.get("crew_max", 1), 
@@ -228,7 +223,6 @@ def add_ship_action():
 def refresh_prices_from_catalog(source_type: str):
     """
     Met à jour les prix dans la flotte à partir de SHIPS_DB et force la sauvegarde.
-    source_type: "STORE" ou "INGAME"
     """
     db = st.session_state.db
     updated = False
@@ -250,7 +244,6 @@ def refresh_prices_from_catalog(source_type: str):
         if source_type == "INGAME" and source == "INGAME":
             new_price_raw = info.get("auec_price", 0)
             
-            # Ne met à jour que si c'est un nombre valide ou une chaîne identique
             if isinstance(new_price_raw, (int, float)) and new_price_raw > 0:
                  if float(ship.get("Prix_aUEC", 0) or 0) != float(new_price_raw):
                     ship["Prix_aUEC"] = float(new_price_raw)
@@ -269,7 +262,7 @@ def refresh_prices_from_catalog(source_type: str):
         else:
             st.error("❌ Erreur lors de la sauvegarde après la mise à jour des prix.")
 
-    st.rerun() # Re-run forcer pour rafraîchir l'affichage
+    st.rerun() 
 
 
 def process_fleet_updates(edited_df: pd.DataFrame):
@@ -609,6 +602,7 @@ def home_page():
                 if not pseudo or len(pin) != 4 or not pin.isdigit():
                     st.error("ID requis et PIN 4 chiffres.")
                 else:
+                    # NOTE: Tentative de recharger la DB pour s'assurer que les users sont à jour
                     st.session_state.db = normalize_db_schema(load_db_from_cloud())
                     users = st.session_state.db["users"]
                     if pseudo in users:
@@ -636,7 +630,6 @@ def catalogue_page():
     with col_filters:
         st.subheader("PARAMÈTRES")
         
-        # Le filtre INGAME est maintenu, mais SHIPS_DB a été unifié pour inclure tous les vaisseaux
         purchase_source = st.radio("SOURCE DE POSSESSION", ["STORE", "INGAME"], captions=["(Achat USD)", "(Achat aUEC)"], index=0 if st.session_state.selected_source == "STORE" else 1, horizontal=False, key="purchase_source_radio")
         st.session_state.selected_source = purchase_source
         
@@ -651,9 +644,7 @@ def catalogue_page():
 
     filtered = {}
     for name, data in SHIPS_DB.items():
-        # Le filtre INGAME fonctionne maintenant car ships_data.py a forcé ingame: True pour tous.
-        # Donc on filtre uniquement sur les autres critères.
-        if purchase_source == "INGAME" and not data.get("ingame", True): continue # Si on filtre sur INGAME, on ignore les vaisseaux dont ingame n'est pas True (même si tous sont True maintenant)
+        # Le filtre INGAME fonctionne car ships_data.py force ingame: True pour tous les affichages
         if brand_filter != "Tous" and data.get("brand") != brand_filter: continue
         if search_selection and name not in search_selection: continue
         filtered[name] = data
@@ -702,7 +693,7 @@ def catalogue_page():
                         elif isinstance(price_value, str):
                             price_display = price_value
                         else:
-                            price_display = "Prix non spécifié" # Au cas où
+                            price_display = "Prix non spécifié" 
                             
                         price_class = "auec-price"
                         
@@ -778,18 +769,16 @@ def catalogue_page():
             
             for key, value in specs_to_display.items():
                 if value not in ("N/A", "-", " Kg", " Kg", " m/s", None):
-                    # Formatage léger pour les nombres massifs (ex: 44,237,159.00 Kg)
                     formatted_value = value
                     if key == "Masse" and isinstance(value, str):
                         try:
-                            # Tente de convertir en float, puis en int si possible, et formate
                             num_value = float(value.replace(' Kg', '').replace(' kg', '').replace(',', ''))
                             if num_value == int(num_value):
                                 formatted_value = f"{int(num_value):,.0f} kg"
                             else:
                                 formatted_value = f"{num_value:,.2f} kg"
                         except ValueError:
-                            formatted_value = value # Retourne la chaîne originale si la conversion échoue
+                            formatted_value = value
                             
                     st.markdown(f"**{key} :** <span style='color:#FFF;'>{formatted_value}</span>", unsafe_allow_html=True)
 
@@ -1008,8 +997,6 @@ def my_hangar_page():
             use_container_width=True,
         ):
             if not combined_edited.empty:
-                # La fonction process_fleet_updates va utiliser le 'id'
-                # présent dans le DataFrame édité pour retrouver et modifier/supprimer
                 process_fleet_updates(combined_edited)
             else:
                 st.info("Aucune modification significative à enregistrer.")
@@ -1022,14 +1009,13 @@ def my_hangar_page():
 
 def render_acquisition_tracking(current_auec_balance, final_target_name):
     """Render the acquisition tracking section, used by my_hangar_page."""
-    st.markdown("---") # Séparateur visuel
+    st.markdown("---")
     st.markdown("## 🎯 SUIVI D'ACQUISITION FUTURE (aUEC)")
     
     # Liste de tous les vaisseaux achetable en aUEC pour le sélecteur cible
     ingame_ships = sorted([name for name, data in SHIPS_DB.items() if data.get('auec_price') != "Non achetable en jeu"])
     ingame_options = ["— Sélectionner un objectif —"] + ingame_ships
     
-    # Déterminer l'index par défaut pour le selectbox
     current_target_index = ingame_options.index(final_target_name) if final_target_name in ingame_options else 0
     
     
@@ -1087,7 +1073,6 @@ def render_acquisition_tracking(current_auec_balance, final_target_name):
         target_info = SHIPS_DB[final_target_name]
         cost_auec_raw = target_info.get('auec_price', 0)
         
-        # S'assurer que le coût est un nombre pour le calcul (il ne devrait pas être une chaîne ici)
         try:
             cost_auec = float(cost_auec_raw)
         except (ValueError, TypeError):
@@ -1123,7 +1108,6 @@ def render_acquisition_tracking(current_auec_balance, final_target_name):
                 st.warning(f"Il vous manque **{remaining:,.0f} aUEC** pour l'acquisition.")
         else:
             st.info("Le vaisseau cible sélectionné n'est pas disponible à l'achat en jeu (prix inconnu ou à 0).")
-    # --- FIN AFFICHAGE PROGRESSION ---
 
 
 def corpo_fleet_page():
