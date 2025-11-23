@@ -144,13 +144,7 @@ def get_local_img_as_base64(path):
     # fallback (le SVG est correct, il est juste long)
     return (
         "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDov"
-        "L3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4MDAiIGhlaWdo"
-        "dD0iNDAwIiB2aWV3Qm94PSIwIDAgODAwIDQwMCI+PHJlY3Qgd2lkdG"
-        "g9IjgwMCIgaGVpZ2h0PSI0MDAiIGZpbGw9IiMwYjBlMTIiLz48dGV4"
-        "dCB4PSI0MDAiIHk9IjIwMCIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRs"
-        "ZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9ImFyaWFs"
-        "IiBmb250LXNpemU9IjUwIiBmaWxsPSIjMDBkNGZmIj5JTUFHRSBNSVNT"
-        "SU5HPC90ZXh0Pjwvc3ZnPg=="
+        "L3d3dy53My5vcmcvMjAwMC9zdmciIHwp"
     )
 
 
@@ -180,6 +174,7 @@ def add_ship_action():
     new_id = int(time.time() * 1_000_000) 
 
     # *** VÉRIFICATION ANTI-DOUBLON SUPPRIMÉE POUR PERMETTRE X2, X3, etc. ***
+    # Si l'utilisateur veut 10x le même vaisseau, il clique 10 fois.
 
     img_b64 = get_local_img_as_base64(info.get("img", ""))
     price_usd = info.get("price", 0.0)
@@ -1006,7 +1001,7 @@ def my_hangar_page():
             "Dispo": st.column_config.CheckboxColumn("OPÉRATIONNEL ?", width="small"),
             "Supprimer": st.column_config.CheckboxColumn("SUPPRIMER", width="small"),
             "Visuel": st.column_config.ImageColumn("APERÇU", width="small"),
-            "Source": st.column_config.TextColumn("SOURCE", width="small"), 
+            "Source": st.column_config.TextColumn("SOURCE", width="small"), # Rendre Source visible
             "Assurance": st.column_config.SelectboxColumn(
                 "ASSURANCE",
                 options=["LTI", "10 Ans", "6 Mois", "2 Mois", "Standard"],
@@ -1487,3 +1482,25 @@ def corpo_fleet_page():
 """,
                 unsafe_allow_html=True,
             )
+
+
+# --- 8. APP PRINCIPALE ---
+
+render_sidebar()
+
+if not st.session_state.current_pilot:
+    # Page d'accueil sans gros titre global
+    home_page()
+else:
+    # Titre global uniquement après connexion
+    st.markdown(
+        "<h1>PIONEER COMMAND | CONSOLE D'OPÉRATIONS</h1>",
+        unsafe_allow_html=True,
+    )
+
+    if st.session_state.menu_nav == "CATALOGUE":
+        catalogue_page()
+    elif st.session_state.menu_nav == "MON HANGAR":
+        my_hangar_page()
+    elif st.session_state.menu_nav == "FLOTTE CORPO":
+        corpo_fleet_page()
