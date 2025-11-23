@@ -187,8 +187,8 @@ def add_ship_action():
         "Marque": info.get("brand", "N/A"),
         "Rôle": info.get("role", "Inconnu"),
         "Dispo": False,
-        "Image": info.get("img", ""),
-        "Visuel": "", # FIX: Ne plus sauvegarder la chaîne Base64 pour économiser de l'espace
+        "Image": info.get("img", ""), # Chemin local du fichier, stocké dans la DB
+        "Visuel": "", # TRÈS IMPORTANT : Stocker vide pour ne pas dépasser 100KB
         "Source": source,
         "Prix_USD": float(price_usd or 0),
         "Prix_aUEC": float(price_aUEC or 0),
@@ -478,18 +478,6 @@ p, div, span, label, .stMarkdown, .stText {{
 /* Bouton de sélection sous la carte */
 .card-footer-button {{
     margin-top: 0;
-}}
-div.card-footer-button > div.stButton > button {{
-    width: 100%;
-    border-radius: 0 0 8px 8px;
-    background: linear-gradient(90deg, #00d4ff, #30e8ff);
-    color: #041623;
-    font-family: 'Orbitron', sans-serif;
-    font-size: 0.8rem;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    padding: 8px 0;
-    font-weight: 700;
 }}
 div.stButton > button:hover {{
     border-color: #00d4ff;
@@ -960,11 +948,9 @@ def my_hangar_page():
         # Conversion des colonnes de prix en numérique
         df_my["Prix_USD"] = pd.to_numeric(df_my["Prix_USD"], errors="coerce").fillna(0)
         df_my["Prix_aUEC"] = pd.to_numeric(df_my["Prix_aUEC"], errors="coerce").fillna(0)
-        df_my["crew_max"] = pd.to_numeric(df_my["crew_max"], errors="coerce").fillna(1)
-
 
         # Colonnes nécessaires pour la sauvegarde mais invisibles
-        columns_internal = ["id", "Image", "Propriétaire", "Prix_USD", "Prix_aUEC", "Prix", "crew_max"]
+        columns_internal = ["id", "Image", "Propriétaire", "Prix_USD", "Prix_aUEC", "Prix"]
         
         # 1. Calcul de la colonne de prix unique pour l'affichage
         df_my["Prix_Acquisition"] = df_my.apply(
@@ -1028,8 +1014,8 @@ def my_hangar_page():
         
         # --- HANGAR STORE ---
         df_store = df_my[df_my["Source"] == "STORE"].reset_index(drop=True).copy()
-        df_store_display = df_store[columns_for_display].copy(); # Selectionner explicitement les colonnes
-        
+        df_store_display = df_store[columns_for_display].copy()
+
         st.markdown("## 💰 HANGAR STORE (Propriété USD)")
 
         if not df_store.empty:
@@ -1214,8 +1200,8 @@ def render_acquisition_tracking(current_auec_balance, final_target_name):
         else:
             st.info("Le vaisseau cible sélectionné n'a pas de prix en aUEC dans le catalogue.")
     # --- FIN AFFICHAGE PROGRESSION ---
-    
-    
+
+
 def corpo_fleet_page():
     """Affiche les statistiques et le détail de la flotte corporative globale."""
     st.subheader("REGISTRE GLOBAL DE LA CORPO")
@@ -1229,19 +1215,17 @@ def corpo_fleet_page():
     # Normalisation pour être sûr d'avoir toutes les colonnes
     df_global_raw = pd.DataFrame(st.session_state.db["fleet"])
     df_global_norm = normalize_db_schema(
-        {"fleet": df_global_raw.to_dict("records"), "users": st.session_state.db.get("users", {}), "user_data": st.session_state.db.get("user_data", {})}
+        {"fleet": df_global_raw.to_dict("records")}
     )["fleet"]
     df_global = pd.DataFrame(df_global_norm)
 
-    # Conversion des colonnes prix/crew en numérique
+    # Conversion des colonnes prix en numérique
     df_global["Prix_USD"] = pd.to_numeric(df_global["Prix_USD"], errors="coerce").fillna(
         0
     )
     df_global["Prix_aUEC"] = pd.to_numeric(
         df_global["Prix_aUEC"], errors="coerce"
     ).fillna(0)
-    df_global["crew_max"] = pd.to_numeric(df_global["crew_max"], errors="coerce").fillna(1)
-
 
     # KPI principaux
     total_ships = len(df_global)
@@ -1373,9 +1357,9 @@ def corpo_fleet_page():
         "✅ Afficher uniquement les vaisseaux opérationnels", value=False
     )
 
-    display_df = df_global.copy(); # Correction de la variable df_my manquante
+    display_df = df_global.copy()
     if show_only_dispo:
-        display_df = display_df[display_df["Dispo"] == True].copy(); # Correction de la variable df_my manquante
+        display_df = display_df[display_df["Dispo"] == True].copy()
 
     display_df["Statut"] = display_df["Dispo"].apply(
         lambda x: "✅ DISPONIBLE" if x else "⛔ NON ASSIGNÉ"
