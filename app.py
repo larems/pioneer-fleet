@@ -72,7 +72,7 @@ def normalize_db_schema(db: dict) -> dict:
     return db
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(ttl=300, show_spinner="Chargement de la base de données...")
 def load_db_from_cloud():
     """Charge la base de données depuis JSONBin.io."""
     if not JSONBIN_KEY:
@@ -99,7 +99,7 @@ def load_db_from_cloud():
 def save_db_to_cloud(data):
     """Sauvegarde la base de données sur JSONBin.io."""
     if not JSONBIN_KEY:
-        st.error("Impossible de sauvegarder : Clé JSONBIN.io (MASTER_KEY) manquante.")
+        st.error("Impossible de sauvegarder : Clé JSONBin.io (MASTER_KEY) manquante.")
         return False
 
     url = f"https://api.jsonbin.io/v3/b/{JSONBIN_ID}"
@@ -859,6 +859,14 @@ def catalogue_page():
                 f"**ASSURANCE :** <span style='color:#FFF;'>{st.session_state.selected_insurance}</span>",
                 unsafe_allow_html=True,
             )
+            
+            # NOUVEAU: Affichage du Crew Max
+            crew_max = info.get("crew_max", 1)
+            st.markdown(
+                f"**CREW MAX :** <span style='color:#FFF;'>{crew_max}</span>",
+                unsafe_allow_html=True
+            )
+
 
             # --- Affichage du prix sans logique de suivi ---
             if st.session_state.selected_source == "STORE":
@@ -903,7 +911,7 @@ def my_hangar_page():
     st.subheader(f"HANGAR LOGISTIQUE | PILOTE: {st.session_state.current_pilot}")
     st.markdown("---")
 
-    # --- LECTURE DES VARIABLES NÉCESSAIRES EN DÉBUT DE FONCTION (CORRECTION DU NAMERROR) ---
+    # --- LECTURE DES VARIABLES NÉCESSAIRES EN DÉBUT DE FONCTION ---
     pilot_data = st.session_state.db.get("user_data", {}).get(st.session_state.current_pilot, {})
     current_auec_balance = pilot_data.get("auec_balance", 0)
     final_target_name = pilot_data.get("acquisition_target", None)
@@ -1015,7 +1023,7 @@ def my_hangar_page():
             total_usd = df_store["Prix_USD"].sum()
             col_usd, col_toggle_usd = st.columns([3, 1])
             show_usd = col_toggle_usd.toggle(
-                "Afficher Valorisation Totale (USD)", value=False, key="toggle_usd"
+                "Afficher Valorisation Totale", value=False, key="toggle_usd"
             )
             col_usd.metric(
                 "VALORISATION STORE", f"${total_usd:,.0f}" if show_usd else "---"
@@ -1034,8 +1042,6 @@ def my_hangar_page():
         else:
             st.info("Aucun vaisseau provenant du Store dans votre hangar.")
             edited_store = pd.DataFrame(columns=columns_for_display)
-
-        st.markdown("---")
 
         # --- HANGAR INGAME ---
         df_ingame = df_my[df_my["Source"] == "INGAME"].reset_index(drop=True).copy()
@@ -1344,13 +1350,27 @@ def corpo_fleet_page():
 
     st.markdown("---")
 
+    # AJOUT DU FILTRE DE RECHERCHE RAPIDE
+    search_term = st.text_input("🔍 Recherche rapide (Vaisseau, Pilote, Rôle)", key="global_search_input_detail")
+    
+    
     # === LISTE DÉTAILLÉE DES UNITÉS (Tableau Regroupé par Pilote) ===
     st.markdown("### 📋 LISTE DÉTAILLÉE DES UNITÉS")
 
     # Filtre sur la disponibilité
     display_df = df_global.copy()
-    if st.checkbox("✅ Afficher uniquement les vaisseaux opérationnels", value=False, key="global_dispo_check"):
+    if st.checkbox("✅ Afficher uniquement les vaisseaux opérationnels", value=False, key="global_dispo_check_detail"):
         display_df = display_df[display_df["Dispo"] == True].copy()
+        
+    # Appliquer la recherche rapide
+    if search_term:
+        search_term = search_term.lower()
+        display_df = display_df[
+            display_df['Vaisseau'].str.lower().str.contains(search_term) |
+            display_df['Propriétaire'].str.lower().str.contains(search_term) |
+            display_df['Rôle'].str.lower().str.contains(search_term)
+        ].copy()
+
 
     # 1. Regrouper les lignes pour la LISTE DÉTAILLÉE (Regrouper par Modèle, Marque, Rôle, Source, Assurance)
     detail_data = display_df.groupby(['Vaisseau', 'Marque', 'Rôle', 'Source', 'Assurance']).agg(
@@ -1368,6 +1388,246 @@ def corpo_fleet_page():
     display_for_table['Source'] = detail_data['Source']
     display_for_table['Assurance'] = detail_data['Assurance']
     display_for_table['Crew Max'] = detail_data['Crew_Max']
+    display_for_table['NB Ex.'] = detail_data['Quantité']
+    
+    # FIX: Régénérer la Base64 en utilisant la colonne 'Image' (chemin local)
+    display_for_table['Aperçu'] = detail_data['Image'].apply(get_local_img_as_base64)
+    
+    # Calculer le Prix Affiché (doit être fait ici car les lignes sont agrégées)
+    def calculate_aggregated_price(row):
+        ship_name = row['Modèle']
+        source = row['Source']
+        
+        # Trouver la ligne correspondante dans le DF original (ou SHIPS_DB)
+        info = SHIPS_DB.get(ship_name)
+        if not info:
+            return "N/A"
+            
+        if source == 'STORE':
+            return f"${info.get('price', 0):,.0f} USD"
+        else:
+            return f"{info.get('auec_price', 0):,.0f} aUEC"
+
+
+    display_for_table['Prix'] = display_for_table.apply(calculate_aggregated_price, axis=1)
+    
+    # 4. Afficher le tableau final
+    st.dataframe(
+        display_for_table,
+        column_config={
+            "Pilotes": st.column_config.TextColumn("PILOTES", help="Liste des propriétaires"),
+            "Modèle": st.column_config.TextColumn("VAISSEAU"),
+            "Classification": st.column_config.TextColumn("RÔLE"),
+            "Source": st.column_config.TextColumn("SOURCE"),
+            "Assurance": st.column_config.TextColumn("ASSURANCE"),
+            "Crew Max": st.column_config.TextColumn("CREW MAX"),
+            "Aperçu": st.column_config.ImageColumn("APERÇU", width="small"),
+            "Prix": st.column_config.TextColumn("PRIX"),
+            "NB Ex.": st.column_config.TextColumn("NB EX.", width="small"), 
+        },
+        use_container_width=True,
+        hide_index=True,
+        height=400,
+        selection_mode="disabled", 
+        key="global_fleet_detail",
+    )
+
+
+def corpo_fleet_page():
+    """Affiche les statistiques et le détail de la flotte corporative globale."""
+    st.subheader("REGISTRE GLOBAL DE LA CORPO")
+
+    if not st.session_state.db["fleet"]:
+        st.info(
+            "Base de données de flotte vide. Demandez aux pilotes d'ajouter leurs vaisseaux."
+        )
+        return
+
+    # Normalisation pour être sûr d'avoir toutes les colonnes
+    df_global_raw = pd.DataFrame(st.session_state.db["fleet"])
+    df_global_norm = normalize_db_schema(
+        {"fleet": df_global_raw.to_dict("records")}
+    )["fleet"]
+    df_global = pd.DataFrame(df_global_norm)
+
+    # Conversion des colonnes prix en numérique
+    df_global["Prix_USD"] = pd.to_numeric(df_global["Prix_USD"], errors="coerce").fillna(
+        0
+    )
+    df_global["Prix_aUEC"] = pd.to_numeric(
+        df_global["Prix_aUEC"], errors="coerce"
+    ).fillna(0)
+
+    # Joindre le Crew Max à partir de SHIPS_DB (pour les totaux et graphiques)
+    def get_ship_info(row, key):
+        return SHIPS_DB.get(row['Vaisseau'], {}).get(key, row.get(key, 1))
+        
+    df_global['Crew_Max_Catalog'] = df_global.apply(lambda row: get_ship_info(row, 'crew_max'), axis=1)
+
+
+    # KPI principaux
+    total_ships = len(df_global)
+    total_dispo = int(df_global["Dispo"].sum())
+    total_pilots = len(st.session_state.db["users"])
+
+    total_value_usd = df_global[df_global["Source"] == "STORE"]["Prix_USD"].sum()
+    total_value_aUEC = df_global[df_global["Source"] == "INGAME"]["Prix_aUEC"].sum()
+
+    st.markdown("---")
+
+    # AFFICHAGE DES KPI AVEC TOGGLE
+    col_kpi, col_toggle = st.columns([4, 1])
+
+    with col_toggle:
+        show_value_kpi = st.toggle(
+            "Afficher Valorisation Totale",
+            value=False,
+            key="toggle_corpo_kpi",
+        )
+
+    with col_kpi:
+        c1, c2, c3, c4, c5 = st.columns(5)
+
+        # Affichage conditionnel des totaux
+        value_usd_display = f"${total_value_usd:,.0f}" if show_value_kpi else "---"
+        value_aUEC_display = f"{total_value_aUEC:,.0f} aUEC" if show_value_kpi else "---"
+
+        c1.metric("PILOTES", total_pilots)
+        c2.metric("FLOTTE TOTALE", total_ships)
+        c3.metric("OPÉRATIONNELS", total_dispo)
+        c4.metric("VALEUR STORE", value_usd_display) # Rétablissement des KPIs
+        c5.metric("COÛT INGAME", value_aUEC_display) # Rétablissement des KPIs
+
+    st.markdown("---")
+
+
+    # === ANALYSES GRAPHIQUES (version plus clean) ===
+    st.markdown("### 📊 ANALYSE DE COMPOSITION")
+    col_chart1, col_chart2 = st.columns(2)
+
+    # 1) Donut par Marque (nombre d'unités)
+    summary_brand = df_global.groupby("Marque").size().reset_index(name="Quantité")
+    summary_brand = summary_brand.sort_values("Quantité", ascending=False)
+
+    fig_brand = px.pie(
+        summary_brand,
+        values="Quantité",
+        names="Marque",
+        hole=0.45,
+        title="Répartition de la flotte par constructeur",
+        color_discrete_sequence=px.colors.sequential.Blues_r,
+    )
+    fig_brand.update_traces(
+        textposition="inside",
+        textinfo="percent+label",
+        pull=[0.04] + [0] * (len(summary_brand) - 1),
+    )
+    fig_brand.update_layout(
+        template="plotly_dark",
+        height=420,
+        margin=dict(t=60, b=0, l=0, r=0),
+        showlegend=False,
+    )
+    col_chart1.plotly_chart(fig_brand, use_container_width=True)
+
+    # 2) Bar chart horizontal par rôle (nombre d'unités)
+    summary_role = df_global.groupby("Rôle").size().reset_index(name="Quantité")
+    summary_role = summary_role.sort_values("Quantité", ascending=True)
+
+    fig_role = px.bar(
+        summary_role,
+        x="Quantité",
+        y="Rôle",
+        orientation="h",
+        title="Répartition par rôle",
+        color="Quantité",
+        color_continuous_scale="Blues",
+    )
+    fig_role.update_layout(
+        template="plotly_dark",
+        height=420,
+        margin=dict(t=60, b=10, l=10, r=10),
+        xaxis_title="Nombre de vaisseaux",
+        yaxis_title="",
+        coloraxis_showscale=False,
+    )
+    fig_role.update_traces(marker_line_width=0.5, marker_line_color="#0a141f")
+    col_chart2.plotly_chart(fig_role, use_container_width=True)
+
+    st.markdown("---")
+
+    # === RÉSUMÉ DES STOCKS ===
+    st.markdown("### 📦 RÉSUMÉ DES STOCKS")
+    
+    # Regroupement des stocks
+    summary_df = (
+        df_global.groupby(["Vaisseau", "Marque", "Rôle"])
+        .agg(
+            Quantité=("Vaisseau", "count"), 
+            Dispo=("Dispo", "sum"),
+            Crew_Max=("Crew_Max_Catalog", "first") 
+        )
+        .reset_index()
+        .sort_values(by="Quantité", ascending=False)
+    )
+
+    st.dataframe(
+        summary_df,
+        column_config={
+            "Quantité": st.column_config.ProgressColumn(
+                "Total",
+                format="%d",
+                min_value=0,
+                max_value=int(summary_df["Quantité"].max()),
+            ),
+            "Dispo": st.column_config.NumberColumn("Prêtables"),
+            "Crew_Max": st.column_config.NumberColumn("CREW MAX", format="%d"), 
+        },
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.markdown("---")
+
+    # AJOUT DU FILTRE DE RECHERCHE RAPIDE
+    search_term = st.text_input("🔍 Recherche rapide (Vaisseau, Pilote, Rôle)", key="global_search_input_detail")
+    
+    
+    # === LISTE DÉTAILLÉE DES UNITÉS (Tableau Regroupé par Pilote) ===
+    st.markdown("### 📋 LISTE DÉTAILLÉE DES UNITÉS")
+
+    # Filtre sur la disponibilité
+    display_df = df_global.copy()
+    if st.checkbox("✅ Afficher uniquement les vaisseaux opérationnels", value=False, key="global_dispo_check"):
+        display_df = display_df[display_df["Dispo"] == True].copy()
+
+    # Appliquer la recherche rapide
+    if search_term:
+        search_term = search_term.lower()
+        display_df = display_df[
+            display_df['Vaisseau'].str.lower().str.contains(search_term) |
+            display_df['Propriétaire'].str.lower().str.contains(search_term) |
+            display_df['Rôle'].str.lower().str.contains(search_term)
+        ].copy()
+
+
+    # 1. Regrouper les lignes pour la LISTE DÉTAILLÉE (Regrouper par Modèle, Marque, Rôle, Source, Assurance)
+    detail_data = display_df.groupby(['Vaisseau', 'Marque', 'Rôle', 'Source', 'Assurance']).agg(
+        Pilotes=('Propriétaire', lambda x: ', '.join(sorted(x.unique()))), # JOINDRE LES PILOTES
+        Quantité=('Vaisseau', 'count'), # Nombre de ships par ligne
+        Crew_Max=('Crew_Max_Catalog', 'first'),
+        Image=('Image', 'first'),
+    ).reset_index()
+
+    # 2. Préparer les colonnes pour l'affichage final
+    display_for_table = pd.DataFrame()
+    display_for_table['Pilotes'] = detail_data['Pilotes']
+    display_for_table['Modèle'] = detail_data['Vaisseau']
+    display_for_table['Classification'] = detail_data['Rôle']
+    display_for_table['Source'] = detail_data['Source']
+    display_for_table['Assurance'] = detail_data['Assurance']
+    display_for_table['Crew Max'] = detail_data['Crew_Max']
+    display_for_table['NB Ex.'] = detail_data['Quantité']
     
     # FIX: Régénérer la Base64 en utilisant la colonne 'Image' (chemin local)
     display_for_table['Visuel'] = detail_data['Image'].apply(get_local_img_as_base64)
@@ -1402,201 +1662,6 @@ def corpo_fleet_page():
             "Crew Max": st.column_config.TextColumn("CREW MAX"),
             "Visuel": st.column_config.ImageColumn("APERÇU", width="small"),
             "Prix": st.column_config.TextColumn("PRIX"),
-            "Quantité": st.column_config.TextColumn("NB EX.", width="small"), 
-        },
-        use_container_width=True,
-        hide_index=True,
-        height=400,
-        selection_mode="disabled", 
-        key="global_fleet_detail",
-    )
-
-
-def corpo_fleet_page():
-    """Affiche les statistiques et le détail de la flotte corporative globale."""
-    st.subheader("REGISTRE GLOBAL DE LA CORPO")
-
-    # 1. Préparation et calcul des données
-    if not st.session_state.db["fleet"]:
-        st.info("Base de données de flotte vide.")
-        return
-
-    df_global = pd.DataFrame(st.session_state.db["fleet"])
-
-    # Normalization and price/crew merging for metrics and display
-    def get_ship_info(row, key):
-        return SHIPS_DB.get(row['Vaisseau'], {}).get(key, row.get(key, 1))
-        
-    df_global['Crew_Max_Catalog'] = df_global.apply(lambda row: get_ship_info(row, 'crew_max'), axis=1)
-
-    # Conversions
-    df_global["Prix_USD"] = pd.to_numeric(df_global["Prix_USD"], errors="coerce").fillna(0)
-    df_global["Prix_aUEC"] = pd.to_numeric(df_global["Prix_aUEC"], errors="coerce").fillna(0)
-    
-    # 2. CALCUL DES KPIS
-    total_ships = len(df_global)
-    total_dispo = int(df_global["Dispo"].sum())
-    total_pilots = len(df_global['Propriétaire'].unique())
-
-    # Calcul des totaux USD/aUEC (pour les KPIs)
-    total_value_usd = df_global[df_global["Source"] == "STORE"]["Prix_USD"].sum()
-    total_value_aUEC = df_global[df_global["Source"] == "INGAME"]["Prix_aUEC"].sum()
-
-    st.markdown("---")
-
-    # 3. AFFICHAGE DES KPI AVEC TOGGLE
-    col_kpi, col_toggle = st.columns([4, 1])
-
-    with col_toggle:
-        show_value_kpi = st.toggle(
-            "Afficher Valorisation Totale",
-            value=False,
-            key="toggle_corpo_kpi",
-        )
-
-    with col_kpi:
-        c1, c2, c3, c4, c5 = st.columns(5)
-
-        # Affichage conditionnel des totaux
-        value_usd_display = f"${total_value_usd:,.0f}" if show_value_kpi else "---"
-        value_aUEC_display = f"{total_value_aUEC:,.0f} aUEC" if show_value_kpi else "---"
-
-        c1.metric("PILOTES", total_pilots)
-        c2.metric("FLOTTE TOTALE", total_ships)
-        c3.metric("OPÉRATIONNELS", total_dispo)
-        c4.metric("VALEUR STORE", value_usd_display)
-        c5.metric("COÛT INGAME", value_aUEC_display) # FIX: Rétablissement des KPIs totaux
-
-    st.markdown("---")
-
-
-    # === ANALYSES GRAPHIQUES (Reste du code de graphiques inchangé) ===
-    st.markdown("### 📊 ANALYSE DE COMPOSITION")
-    col_chart1, col_chart2 = st.columns(2)
-
-    # 1) Donut par Marque (nombre d'unités)
-    summary_brand = df_global.groupby("Marque").size().reset_index(name="Quantité")
-    summary_brand = summary_brand.sort_values("Quantité", ascending=False)
-
-    fig_brand = px.pie(
-        summary_brand,
-        values="Quantité",
-        names="Marque",
-        hole=0.45,
-        title="Répartition de la flotte par constructeur",
-        color_discrete_sequence=px.colors.sequential.Blues_r,
-    )
-    col_chart1.plotly_chart(fig_brand, use_container_width=True)
-
-    # 2) Bar chart horizontal par rôle (nombre d'unités)
-    summary_role = df_global.groupby("Rôle").size().reset_index(name="Quantité")
-    summary_role = summary_role.sort_values("Quantité", ascending=True)
-
-    fig_role = px.bar(
-        summary_role,
-        x="Quantité",
-        y="Rôle",
-        orientation="h",
-        title="Répartition par rôle",
-        color="Quantité",
-        color_continuous_scale="Blues",
-    )
-    col_chart2.plotly_chart(fig_role, use_container_width=True)
-
-    st.markdown("---")
-
-    # === RÉSUMÉ DES STOCKS ===
-    st.markdown("### 📦 RÉSUMÉ DES STOCKS")
-    
-    summary_df = (
-        df_global.groupby(["Vaisseau", "Marque", "Rôle"])
-        .agg(
-            Quantité=("Vaisseau", "count"), 
-            Dispo=("Dispo", "sum"),
-            Crew_Max=("Crew_Max_Catalog", "first") 
-        )
-        .reset_index()
-        .sort_values(by="Quantité", ascending=False)
-    )
-
-    st.dataframe(
-        summary_df,
-        column_config={
-            "Quantité": st.column_config.ProgressColumn("Total", format="%d", min_value=0, max_value=int(summary_df["Quantité"].max())),
-            "Dispo": st.column_config.NumberColumn("Prêtables"),
-            "Crew_Max": st.column_config.NumberColumn("CREW MAX", format="%d"), 
-        },
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    st.markdown("---")
-
-    # === LISTE DÉTAILLÉE DES UNITÉS (Tableau Regroupé par Pilote) ===
-    st.markdown("### 📋 LISTE DÉTAILLÉE DES UNITÉS")
-
-    # Filtre sur la disponibilité
-    display_df = df_global.copy()
-    if st.checkbox("✅ Afficher uniquement les vaisseaux opérationnels", value=False, key="global_dispo_check"):
-        display_df = display_df[display_df["Dispo"] == True].copy()
-
-    # AJOUT DU FILTRE DE RECHERCHE
-    search_term = st.text_input("🔍 Recherche rapide (Vaisseau ou Pilote)", key="global_search_input")
-    if search_term:
-        search_term = search_term.lower()
-        display_df = display_df[
-            display_df['Vaisseau'].str.lower().str.contains(search_term) |
-            display_df['Propriétaire'].str.lower().str.contains(search_term)
-        ].copy()
-
-
-    # 1. Regrouper les lignes pour la LISTE DÉTAILLÉE (Regroupement FINALLY RE-IMPLEMENTED)
-    detail_data = display_df.groupby(['Vaisseau', 'Marque', 'Rôle', 'Source', 'Assurance']).agg(
-        Pilotes=('Propriétaire', lambda x: ', '.join(sorted(x.unique()))), # JOINDRE LES PILOTES
-        Quantité=('Vaisseau', 'count'), # Nombre de ships par ligne
-        Crew_Max=('Crew_Max_Catalog', 'first'),
-        Image=('Image', 'first'),
-    ).reset_index()
-
-
-    # 2. Préparer les colonnes pour l'affichage final
-    display_for_table = pd.DataFrame()
-    display_for_table['Pilotes'] = detail_data['Pilotes']
-    display_for_table['Modèle'] = detail_data['Vaisseau']
-    display_for_table['Classification'] = detail_data['Rôle']
-    display_for_table['Source'] = detail_data['Source']
-    display_for_table['Assurance'] = detail_data['Assurance']
-    display_for_table['Crew Max'] = detail_data['Crew_Max'].astype(str) # Convertir en string pour le TextColumn
-    display_for_table['NB Ex.'] = detail_data['Quantité']
-    
-    # FIX: Régénérer la Base64 en utilisant la colonne 'Image' (chemin local)
-    display_for_table['Aperçu'] = detail_data['Image'].apply(get_local_img_as_base64)
-    
-    # Calculer le Prix Affiché (Prix de l'unité)
-    def calculate_aggregated_price(row):
-        info = SHIPS_DB.get(row['Modèle'])
-        if not info: return "N/A"
-            
-        if row['Source'] == 'STORE':
-            return f"${info.get('price', 0):,.0f} USD"
-        else:
-            return f"{info.get('auec_price', 0):,.0f} aUEC"
-
-
-    display_for_table['Prix'] = display_for_table.apply(calculate_aggregated_price, axis=1)
-    
-    # 3. Afficher le tableau final
-    st.dataframe(
-        display_for_table,
-        column_config={
-            "Pilotes": st.column_config.TextColumn("PILOTES", help="Liste des propriétaires"),
-            "Modèle": st.column_config.TextColumn("VAISSEAU"),
-            "Classification": st.column_config.TextColumn("RÔLE"),
-            "Source": st.column_config.TextColumn("SOURCE"),
-            "Assurance": st.column_config.TextColumn("ASSURANCE"),
-            "Crew Max": st.column_config.TextColumn("CREW MAX"),
-            "Aperçu": st.column_config.ImageColumn("APERÇU", width="small"),
-            "Prix": st.column_config.TextColumn("PRIX"),
             "NB Ex.": st.column_config.TextColumn("NB EX.", width="small"), 
         },
         use_container_width=True,
@@ -1609,7 +1674,9 @@ def corpo_fleet_page():
 
 # --- MAIN ---
 render_sidebar()
-if not st.session_state.current_pilot: home_page()
+
+if not st.session_state.current_pilot:
+    home_page()
 else:
     st.markdown("<h1>PIONEER COMMAND | CONSOLE D'OPÉRATIONS</h1>", unsafe_allow_html=True)
     if st.session_state.menu_nav == "CATALOGUE": catalogue_page()
