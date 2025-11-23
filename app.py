@@ -678,7 +678,7 @@ def catalogue_page():
         )
         st.session_state.selected_source = purchase_source
 
-        insurance_options = ["LTI", "10 Ans", "6 Mois", "2 Mois", "Standard"]
+        insurance_options = ["LTI", "10 Ans", "2 ans", "6 Mois", "2 Mois""Standard"]
         selected_insurance = st.selectbox(
             "ASSURANCE ACQUISE",
             insurance_options,
