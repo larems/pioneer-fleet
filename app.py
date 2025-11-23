@@ -293,7 +293,6 @@ p, div, span, label, .stMarkdown, .stText {{
 }}
 
 /* Réinitialisation des styles de prix spécifiques pour laisser le formatage des colonnes le gérer */
-/* (Ceci s'assure qu'aucun CSS précédent ne cause de conflit) */
 .stDataFrame td:nth-child(7), .stDataFrame th:nth-child(7),
 .stDataFrame td:nth-child(8), .stDataFrame th:nth-child(8) {{
     color: inherit !important;
@@ -875,19 +874,33 @@ def my_hangar_page():
     df_my["Prix_aUEC"] = pd.to_numeric(df_my["Prix_aUEC"], errors="coerce").fillna(0)
     
     # AJOUT DE L'ANCIENNE COLONNE 'Prix' À LA SUPPRESSION
-    # 'Prix' est la colonne visible dans votre image qui doit disparaître
     columns_to_drop = ["id", "Image", "Propriétaire", "Prix"] 
     
+    # --- BOUTONS D'ACTUALISATION FORCÉE DES PRIX ---
+    col_refresh_left, col_refresh_right = st.columns([1, 1])
+    
+    if col_refresh_left.button("♻️ Actualiser Prix USD / DB", use_container_width=True):
+        # Force le rechargement de la DB et le rerun
+        load_db_from_cloud.clear()
+        st.session_state.db = normalize_db_schema(load_db_from_cloud())
+        st.rerun()
+    
+    if col_refresh_right.button("♻️ Actualiser Prix aUEC / DB", use_container_width=True):
+        # Force le rechargement de la DB et le rerun
+        load_db_from_cloud.clear()
+        st.session_state.db = normalize_db_schema(load_db_from_cloud())
+        st.rerun()
+        
     st.caption(
         "❗ Utilisez **ACTUALISER** pour synchroniser les changements (Disponibilité / Suppression / Assurance) avec la base de données centrale."
     )
+    st.markdown("---") # Séparateur
 
     # --- HANGAR STORE ---
     df_store = df_my[df_my["Source"] == "STORE"].reset_index(drop=True).copy()
     df_store_display = df_store.drop(columns=columns_to_drop, errors="ignore")
     
     # Configuration spécifique pour le Store: USD actif (vert)
-    # --- CORRECTION DE LA TYPERROR ---
     editable_columns_store = {
         "Dispo": st.column_config.CheckboxColumn("OPÉRATIONNEL ?", width="small"),
         "Supprimer": st.column_config.CheckboxColumn("SUPPRIMER", width="small"),
@@ -897,37 +910,21 @@ def my_hangar_page():
             options=["LTI", "10 Ans", "6 Mois", "2 Mois", "Standard"],
             width="medium",
         ),
-        # On ne met pas de style direct ici pour éviter le TypeError. On utilise l'option "color"
+        # On utilise le formatage de couleur natif et stable de Streamlit (gris si 0)
         "Prix_USD": st.column_config.NumberColumn(
             "VALEUR USD", 
             format="$%,.0f", 
             help="Valeur en dollars réels.",
-            # REMOVE: text_color=lambda x: "#00ff00" if x > 0 else "#666666" 
+            # Utilisation de la fonction lambda compatible pour la couleur
+            text_color=lambda x: "#00ff00" if x > 0 else "#666666" 
         ),
         "Prix_aUEC": st.column_config.NumberColumn(
             "COÛT aUEC", 
             format="%,.0f",
         ),
-        # Pour le marquage visuel, nous allons ajouter un CSS sur le conteneur du data_editor
     }
     
-    # --- AJOUT DE CSS POUR MARQUER LA COLONNE ACTIVE (STORE: USD) ---
-    # Ceci est la méthode la plus stable pour marquer une colonne entière sans lambda
-    custom_css_store = """
-    <style>
-        /* Cibler l'éditeur pour appliquer des styles précis */
-        /* Nous ciblons la 7ème colonne (VALEUR USD) pour être verte */
-        div[data-testid="stDataFrame"] .row-index-none .col-header:nth-child(7),
-        div[data-testid="stDataFrame"] .row-index-none .cell:nth-child(7) {
-            color: #00ff00 !important;
-            font-weight: bold;
-        }
-    </style>
-    """
-    
     st.markdown("## 💰 HANGAR STORE (Propriété USD)")
-    # Le $0 visible dans votre image était l'ancienne métrique sans colonne. 
-    # Le nouveau st.metric va s'afficher en haut de l'espace alloué.
     
     if not df_store.empty:
         total_usd = df_store["Prix_USD"].sum()
@@ -939,10 +936,7 @@ def my_hangar_page():
             "VALORISATION STORE", f"${total_usd:,.0f}" if show_usd else "---"
         )
         
-        # Ajout du CSS pour colorer la colonne USD
-        st.markdown(custom_css_store, unsafe_allow_html=True)
-        st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) 
-
+        # Le CSS pour la couleur USD a été réactivé dans le dict de config pour la stabilité
         edited_store_display = st.data_editor(
             df_store_display,
             column_config=editable_columns_store,
@@ -972,7 +966,6 @@ def my_hangar_page():
     df_ingame_display = df_ingame.drop(columns=columns_to_drop, errors="ignore")
     
     # Configuration spécifique pour Ingame: aUEC actif (turquoise)
-    # --- CORRECTION DE LA TYPERROR ---
     editable_columns_ingame = {
         "Dispo": st.column_config.CheckboxColumn("OPÉRATIONNEL ?", width="small"),
         "Supprimer": st.column_config.CheckboxColumn("SUPPRIMER", width="small"),
@@ -986,27 +979,16 @@ def my_hangar_page():
             "VALEUR USD", 
             format="$%,.0f", 
         ),
+        # CORRECTION AFFICHER PRIX AUEC EN TURQUOISE (COLONNE ACTIVE)
         "Prix_aUEC": st.column_config.NumberColumn(
             "COÛT aUEC", 
             format="%,.0f",
             help="Coût en aUEC pour l'achat en jeu.",
-            # REMOVE: text_color=lambda x: "#30e8ff" if x > 0 else "#666666" 
+            text_color=lambda x: "#30e8ff" if x > 0 else "#666666" # Turquoise
         ),
     }
 
-    # --- AJOUT DE CSS POUR MARQUER LA COLONNE ACTIVE (INGAME: AUEC) ---
-    custom_css_ingame = """
-    <style>
-        /* Cibler l'éditeur pour appliquer des styles précis */
-        /* Nous ciblons la 8ème colonne (COÛT aUEC) pour être turquoise */
-        div[data-testid="stDataFrame"] .row-index-none .col-header:nth-child(8),
-        div[data-testid="stDataFrame"] .row-index-none .cell:nth-child(8) {
-            color: #30e8ff !important;
-            font-weight: bold;
-        }
-    </style>
-    """
-    
+
     st.markdown("## 💸 HANGAR INGAME (Acquisition aUEC)")
 
     if not df_ingame.empty:
@@ -1019,10 +1001,6 @@ def my_hangar_page():
             "COÛT ACQUISITION", f"{total_aUEC:,.0f} aUEC" if show_aUEC else "---"
         )
         
-        # Ajout du CSS pour colorer la colonne aUEC
-        st.markdown(custom_css_ingame, unsafe_allow_html=True)
-        st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) 
-
         edited_ingame_display = st.data_editor(
             df_ingame_display,
             column_config=editable_columns_ingame,
