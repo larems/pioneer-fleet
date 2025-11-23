@@ -5,8 +5,7 @@ import base64
 import os
 import requests
 import time
-# Assurez-vous que le fichier ships_data.py existe et contient le dictionnaire SHIPS_DB
-from ships_data import SHIPS_DB 
+from ships_data import SHIPS_DB
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(
@@ -439,15 +438,10 @@ p, div, span, label, .stMarkdown, .stText {{
     background: #00d4ff;
     color: #041623;
 }
-.card-checkbox-overlay [data-testid="stCheckbox"] > label > div {
-    /* Style du texte */
-    color: white !important;
-    font-family: 'Orbitron', sans-serif !important;
-    text-transform: uppercase;
-    font-size: 0.85rem;
-    font-weight: 700;
+/* IMPORTANT: Masquer la case à cocher native de Streamlit pour n'afficher que le label stylisé */
+div[data-testid^="stCheckbox"] > label > div:first-child {
+    display: none !important;
 }
-/* Fin des ajustements Checkbox */
 
 .card-img-container {{
     width: 100%;
@@ -757,28 +751,47 @@ def catalogue_page():
                         role = data.get("role", "Inconnu")
                         brand = data.get("brand", "N/A")
 
-                        # NOUVEAU: Case à cocher pour la sélection
+                        # NOUVEAU: Case à cocher pour la sélection (widget Streamlit invisible)
                         checkbox_key = f"check_{name}"
                         
-                        # On stocke le résultat de st.checkbox dans une variable, mais on ne l'utilise pas directement dans le markdown
+                        # On place un widget Streamlit checkbox. Son état sera récupéré après soumission.
+                        # On le rend invisible/transparent via CSS pour qu'il soit sur la carte.
                         is_selected = st.checkbox(
                             f"SÉLECTIONNER", 
                             key=checkbox_key, 
-                            value=False, # Toujours commencer non coché à chaque changement de page/filtre
+                            value=False, 
+                            label_visibility="collapsed", 
                         )
-
                         
-                        # On utilise le code HTML pour styliser le bloc comme avant
-                        # La checkbox est rendue par la fonction st.checkbox ci-dessus
+                        # On utilise le code HTML pour styliser le bloc.
+                        selected_class = "selected-card" if is_selected else ""
+                        
+                        # Définir le contenu du label personnalisé
+                        label_text = f"✅ SÉLECTIONNÉ" if is_selected else "☐ SÉLECTIONNER"
+                        label_color = '#041623' if is_selected else '#ffffff'
+                        label_background = '#00d4ff' if is_selected else 'rgba(4, 20, 35, 0.9)'
+
+
                         st.markdown(f"""
 <div class="catalog-card-wrapper">
-  <div class="catalog-card">
+  <div class="catalog-card {selected_class}">
     <div class="card-checkbox-overlay">
         <div data-testid="stCheckbox">
-            <label for="{checkbox_key}" style="display: none;">Checkbox invisible</label>
-        </div>
-        <label for="{checkbox_key}" class="custom-checkbox-label">
-            <span class="custom-checkbox-text">SÉLECTIONNER</span>
+            </div>
+        
+        <label for="{checkbox_key}" style="
+            background: {label_background};
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid #00d4ff;
+            box-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
+            cursor: pointer;
+            display: inline-block;
+            transition: all 0.2s;
+        ">
+            <span style="font-family: 'Orbitron', sans-serif; font-weight: 700; color: {label_color}; text-transform: uppercase;">
+                {label_text}
+            </span>
         </label>
     </div>
     <div class="card-img-container">
@@ -800,7 +813,6 @@ def catalogue_page():
 </div>
 """, unsafe_allow_html=True)
                         
-                        # Le bouton "Sélectionner ce vaisseau" est supprimé
 
             st.markdown("---")
             # --- BOUTON DE SOUMISSION UNIQUE DU FORMULAIRE ---
@@ -817,6 +829,7 @@ def catalogue_page():
             else:
                 # 1. Identifier tous les vaisseaux qui ont été cochés
                 selected_ship_names = []
+                
                 # On itère sur les items affichés (et donc soumis dans le formulaire)
                 for ship_name, _ in current_items: 
                     checkbox_key = f"check_{ship_name}"
@@ -838,8 +851,6 @@ def catalogue_page():
 
     with col_commander:
         st.subheader("ACQUISITION LOGISTIQUE")
-        
-        # Le contenu de cette colonne est ajusté car on ne gère plus la "sélection simple"
         
         if st.session_state.current_pilot:
             pilot_data = st.session_state.db.get("user_data", {}).get(st.session_state.current_pilot, {})
@@ -864,9 +875,6 @@ def catalogue_page():
         
         if not st.session_state.current_pilot:
             st.info("Connectez-vous pour enregistrer un vaisseau.")
-
-        # Le détail du vaisseau sélectionné n'est plus pertinent ici.
-        # Vous pouvez le remettre si vous voulez, mais cela complexifie le nouveau workflow.
 
 
 def my_hangar_page():
