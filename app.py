@@ -680,7 +680,7 @@ def catalogue_page():
         )
         st.session_state.selected_source = purchase_source
 
-        # FIX: Ajout de '2 ans' et correction de la syntaxe de la liste
+        # FIX: Correction de la syntaxe des options de la liste
         insurance_options = ["LTI", "10 Ans", "2 ans", "6 Mois", "2 Mois", "Standard"] 
         selected_insurance = st.selectbox(
             "ASSURANCE ACQUISE",
@@ -1282,7 +1282,7 @@ def corpo_fleet_page():
 
     # 1) Donut par Marque (nombre d'unités)
     summary_brand = df_global.groupby("Marque").size().reset_index(name="Quantité")
-    summary_brand = summary_role.sort_values("Quantité", ascending=False)
+    summary_brand = summary_brand.sort_values("Quantité", ascending=False)
 
     fig_brand = px.pie(
         summary_brand,
@@ -1371,7 +1371,7 @@ def corpo_fleet_page():
         "✅ Afficher uniquement les vaisseaux opérationnels", value=False
     )
 
-    display_df = df_global.copy()
+    display_df = df_global.copy(); # Correction de la variable df_my manquante
     if show_only_dispo:
         display_df = display_df[display_df["Dispo"] == True].copy()
 
