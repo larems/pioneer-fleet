@@ -3,25 +3,55 @@ import pandas as pd
 import plotly.express as px
 import base64
 import os
-import json
 import requests
 import time
 from ships_data import SHIPS_DB
 
 # --- 1. CONFIGURATION ---
-st.set_page_config(page_title="PIONEER COMMAND | OPS CONSOLE", layout="wide", page_icon="💠")
+st.set_page_config(
+    page_title="PIONEER COMMAND | OPS CONSOLE",
+    layout="wide",
+    page_icon="💠",
+)
 BACKGROUND_IMAGE = "assets/fondecransite.png"
 
 # --- 2. GESTION DATABASE (JSONBIN.IO) ---
-# Configuration pour la production: lecture des clés depuis l'environnement sécurisé (st.secrets)
 JSONBIN_ID = st.secrets.get("JSONBIN_ID", "6921f0ded0ea881f40f9433f")
 JSONBIN_KEY = st.secrets.get("JSONBIN_KEY", "")
+
+
+def normalize_db_schema(db: dict) -> dict:
+    """
+    Normalise la structure de la DB pour éviter les KeyError
+    (ajout des clés manquantes avec valeurs par défaut).
+    """
+    db.setdefault("users", {})
+    db.setdefault("fleet", [])
+
+    for i, ship in enumerate(db["fleet"]):
+        ship.setdefault("id", int(time.time() * 1_000_000) + i)
+        ship.setdefault("Propriétaire", "INCONNU")
+        ship.setdefault("Vaisseau", "Inconnu")
+        ship.setdefault("Marque", "N/A")
+        ship.setdefault("Rôle", "Inconnu")
+        ship.setdefault("Dispo", False)
+        ship.setdefault("Image", "")
+        ship.setdefault("Visuel", "")
+        ship.setdefault("Source", "STORE")
+        ship.setdefault("Prix_USD", 0.0)
+        ship.setdefault("Prix_aUEC", 0.0)
+        ship.setdefault("Assurance", "Standard")
+
+    return db
+
 
 @st.cache_data(ttl=300, show_spinner="Chargement de la base de données...")
 def load_db_from_cloud():
     """Charge la base de données depuis JSONBin.io."""
     if not JSONBIN_KEY:
-        st.warning("⚠️ Clé JSONBIN.io (MASTER_KEY) manquante. Utilisation d'une base de données locale temporaire.")
+        st.warning(
+            "⚠️ Clé JSONBIN.io (MASTER_KEY) manquante. Utilisation d'une base de données locale temporaire."
+        )
         return {"users": {}, "fleet": []}
 
     url = f"https://api.jsonbin.io/v3/b/{JSONBIN_ID}/latest"
@@ -30,15 +60,14 @@ def load_db_from_cloud():
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 200:
             data = response.json().get("record", {"users": {}, "fleet": []})
-            data.setdefault("users", {})
-            data.setdefault("fleet", [])
-            return data
+            return normalize_db_schema(data)
         else:
-            st.error(f"Erreur de chargement DB: Statut {response.status_code}. Vérifiez l'ID et la clé.")
+            st.error(f"Erreur de chargement DB: Statut {response.status_code}.")
     except requests.exceptions.RequestException as e:
         st.error(f"Erreur réseau/timeout lors du chargement: {e}")
-    
+
     return {"users": {}, "fleet": []}
+
 
 def save_db_to_cloud(data):
     """Sauvegarde la base de données sur JSONBin.io."""
@@ -48,26 +77,29 @@ def save_db_to_cloud(data):
 
     url = f"https://api.jsonbin.io/v3/b/{JSONBIN_ID}"
     headers = {"Content-Type": "application/json", "X-Master-Key": JSONBIN_KEY}
-    
+
     try:
         response = requests.put(url, json=data, headers=headers, timeout=10)
         if response.status_code not in (200, 204):
-             st.error(f"Erreur de sauvegarde DB: Statut {response.status_code}")
-             return False
+            st.error(f"Erreur de sauvegarde DB: Statut {response.status_code}")
+            return False
     except requests.exceptions.RequestException as e:
         st.error(f"Erreur réseau/timeout lors de la sauvegarde: {e}")
         return False
-    
-    load_db_from_cloud.clear() 
+
+    load_db_from_cloud.clear()
     return True
 
+
+# DB dans la session
 if "db" not in st.session_state:
-    st.session_state.db = load_db_from_cloud()
-st.session_state.db.setdefault("users", {})
-st.session_state.db.setdefault("fleet", [])
+    st.session_state.db = normalize_db_schema(load_db_from_cloud())
+else:
+    st.session_state.db = normalize_db_schema(st.session_state.db)
 
 
 # --- 3. FONCTIONS UTILITAIRES & ACTIONS ---
+
 
 @st.cache_data(show_spinner=False)
 def get_local_img_as_base64(path):
@@ -81,7 +113,17 @@ def get_local_img_as_base64(path):
             return f"data:{mime_type};base64,{encoded}"
         except Exception:
             pass
-    return "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4MDAiIGhlaWdodD0iNDAwIiB2aWV3Qm94PSIwIDAgODAwIDQwMCI+PHJlY3Qgd2lkdGg9IjgwMCIgaGVpZ2h0PSI0MDAiIGZpbGw9IiMwYjBlMTIiLz48dGV4dCB4PSI0MDAiIHk9IjIwMCIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9ImFyaWFsIiBmb250LXNpemU9IjUwIiBmaWxsPSIjMDBkNGZmIj5VSSBUSU1FIERBVEFCSyAtIE1pc3NpbmcgSW1hZ2U8L3RleHQ+PC9zdmc+"
+    # fallback
+    return (
+        "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDov"
+        "L3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4MDAiIGhlaWdo"
+        "dD0iNDAwIiB2aWV3Qm94PSIwIDAgODAwIDQwMCI+PHJlY3Qgd2lkdG"
+        "g9IjgwMCIgaGVpZ2h0PSI0MDAiIGZpbGw9IiMwYjBlMTIiLz48dGV4"
+        "dCB4PSI0MDAiIHk9IjIwMCIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRs"
+        "ZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9ImFyaWFs"
+        "IiBmb250LXNpemU9IjUwIiBmaWxsPSIjMDBkNGZmIj5JTUFHRSBNSVNT"
+        "SU5HPC90ZXh0Pjwvc3ZnPg=="
+    )
 
 
 def select_ship(ship_name, source, insurance):
@@ -89,6 +131,7 @@ def select_ship(ship_name, source, insurance):
     st.session_state.selected_ship_name = ship_name
     st.session_state.selected_source = source
     st.session_state.selected_insurance = insurance
+
 
 def add_ship_action():
     """Ajoute le vaisseau sélectionné à la flotte (enregistrement de possession)."""
@@ -98,11 +141,14 @@ def add_ship_action():
     insurance = st.session_state.selected_insurance
 
     if ship_name is None or ship_name not in SHIPS_DB or not owner:
-        st.toast("Erreur d'ajout. Veuillez vous connecter et sélectionner un vaisseau.", icon="❌")
+        st.toast(
+            "Erreur d'ajout. Veuillez vous connecter et sélectionner un vaisseau.",
+            icon="❌",
+        )
         return
 
     info = SHIPS_DB[ship_name]
-    new_id = int(time.time() * 1000000)
+    new_id = int(time.time() * 1_000_000)
 
     # Vérification anti-doublon
     is_duplicate = any(
@@ -114,12 +160,15 @@ def add_ship_action():
     )
 
     if is_duplicate:
-        st.toast(f"🛑 {ship_name} est déjà enregistré avec cette configuration d'assurance/source.", icon="🛑")
+        st.toast(
+            f"🛑 {ship_name} est déjà enregistré avec cette configuration d'assurance/source.",
+            icon="🛑",
+        )
         return
 
     img_b64 = get_local_img_as_base64(info.get("img", ""))
-    price_usd = info.get("price", 0)
-    price_auec = info.get("auec_price", 0)
+    price_usd = info.get("price", 0.0)
+    price_auec = info.get("auec_price", 0.0)
 
     new_entry = {
         "id": new_id,
@@ -131,21 +180,23 @@ def add_ship_action():
         "Image": info.get("img", ""),
         "Visuel": img_b64,
         "Source": source,
-        "Prix_USD": price_usd,
-        "Prix_aUEC": price_auec,
+        "Prix_USD": float(price_usd or 0),
+        "Prix_aUEC": float(price_auec or 0),
         "Assurance": insurance,
     }
 
     st.session_state.db["fleet"].append(new_entry)
-    
+    st.session_state.db = normalize_db_schema(st.session_state.db)
+
     if save_db_to_cloud(st.session_state.db):
         st.session_state.session_log.append(f"+ {ship_name} enregistré ({insurance})")
         st.toast(f"✅ {ship_name} ENREGISTRÉ DANS HANGAR!", icon="🚀")
         st.session_state.selected_ship_name = None
-        time.sleep(0.5)
+        time.sleep(0.4)
         st.rerun()
 
-def process_fleet_updates(edited_df):
+
+def process_fleet_updates(edited_df: pd.DataFrame):
     """Met à jour les entrées de la flotte (disponibilité, suppression, assurance) et sauvegarde."""
     if edited_df.empty:
         st.info("Aucune modification à synchroniser.")
@@ -155,38 +206,47 @@ def process_fleet_updates(edited_df):
     current_fleet = current_db["fleet"]
     needs_save = False
 
-    ids_to_delete = edited_df[edited_df.get("Supprimer", False) == True]["id"].tolist()
+    # Suppression
+    if "Supprimer" in edited_df.columns:
+        ids_to_delete = edited_df[edited_df["Supprimer"] == True]["id"].tolist()
+    else:
+        ids_to_delete = []
+
     if ids_to_delete:
-        current_fleet[:] = [s for s in current_fleet if s.get("id") not in ids_to_delete]
+        current_fleet[:] = [
+            s for s in current_fleet if s.get("id") not in ids_to_delete
+        ]
         needs_save = True
         st.toast(f"🗑️ {len(ids_to_delete)} vaisseaux supprimés.", icon="🗑️")
 
-    update_df = edited_df[~edited_df["id"].isin(ids_to_delete)]
-    
-    update_map = update_df.set_index("id")[["Dispo", "Assurance"]].to_dict('index')
-
-    for ship in current_fleet:
-        ship_id = ship.get("id")
-        if ship_id in update_map:
-            update = update_map[ship_id]
-            
-            if "Dispo" in update and ship["Dispo"] != update["Dispo"]:
-                ship["Dispo"] = update["Dispo"]
-                needs_save = True
-            
-            current_assurance = ship.get("Assurance")
-            if "Assurance" in update and current_assurance != update["Assurance"]:
-                ship["Assurance"] = update["Assurance"]
-                needs_save = True
+    # Mise à jour dispo / assurance
+    update_df = edited_df[
+        ~edited_df["id"].isin(ids_to_delete)
+    ].copy()
+    if not update_df.empty:
+        for ship in current_fleet:
+            sid = ship.get("id")
+            row = update_df[update_df["id"] == sid]
+            if not row.empty:
+                row = row.iloc[0]
+                if "Dispo" in row and ship["Dispo"] != row["Dispo"]:
+                    ship["Dispo"] = bool(row["Dispo"])
+                    needs_save = True
+                if "Assurance" in row and ship.get("Assurance") != row["Assurance"]:
+                    ship["Assurance"] = row["Assurance"]
+                    needs_save = True
 
     if needs_save:
+        current_db = normalize_db_schema(current_db)
         if save_db_to_cloud(current_db):
             st.session_state.db = current_db
             st.success("✅ Synchronisation terminée")
-            time.sleep(1)
+            time.sleep(0.6)
             st.rerun()
     else:
-        st.info("Aucune modification détectée (Disponibilité / Assurance / Suppression).")
+        st.info(
+            "Aucune modification détectée (Disponibilité / Assurance / Suppression)."
+        )
 
 
 # --- 4. CSS (Styles optimisés) ---
@@ -197,7 +257,7 @@ st.markdown(
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@500&display=swap');
 
-/* FOND GLOBAL ET OPACITÉ */
+/* FOND GLOBAL */
 .stApp {{
     background-image: url("{bg_img_code}");
     background-size: cover;
@@ -212,7 +272,7 @@ st.markdown(
     z-index: -1;
 }}
 
-/* BARRE LATÉRALE */
+/* SIDEBAR */
 section[data-testid="stSidebar"] {{
     background-color: rgba(5, 10, 18, 0.98);
     border-right: 1px solid #123;
@@ -233,58 +293,8 @@ p, div, span, label, .stMarkdown, .stText {{
     font-family: 'Rajdhani', sans-serif !important;
     color: #e0e0e0;
 }}
-/* Style pour st.caption dans la sidebar */
-.st-emotion-cache-1pxx7r2, .st-emotion-cache-1pxx7r2 p {{
-    color: #8899aa !important; 
-    font-size: 0.8em;
-}}
 
-/* --- DÉBUT DES STYLES SPÉCIFIQUES --- */
-
-.ships-name {{
-    font-family: 'Orbitron', sans-serif !important;
-    color: #ffffff !important;
-    font-weight: 700;
-    font-size: 1.2rem;
-    margin: 6px 0 2px 0;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    line-height: 1.2;
-}}
-.card-brand {{
-    font-size: 0.8rem;
-    color: #9aa8b8;
-    text-transform: uppercase;
-    margin-bottom: 2px;
-}}
-.ship-price-value {{
-    font-family: 'Orbitron', sans-serif !important;
-    font-weight: 700;
-    font-size: 1.05rem;
-    text-transform: uppercase;
-    margin-top: 2px;
-    text-align: right;
-    min-width: 120px;
-    color: #00d4ff;
-}}
-.ship-price-value.auec-price {{
-    color: #30e8ff;
-}}
-.card-role-info {{
-    font-size: 0.85rem;
-    color: #c5d0dd;
-    text-transform: uppercase;
-    padding-top: 2px;
-}}
-
-/* ALERTES */
-div[data-testid="stAlert"] {{
-    background-color: rgba(10, 16, 24, 0.9);
-    border: 1px solid #00d4ff;
-    color: #e0e0e0;
-}}
-
-/* --- CARDS CATALOGUE STYLE RSI-LIKE --- */
+/* CARTES CATALOGUE */
 .catalog-card-wrapper {{
     margin-bottom: 16px;
 }}
@@ -309,7 +319,6 @@ div[data-testid="stAlert"] {{
     border-color: #30e8ff;
     box-shadow: 0 0 18px rgba(0, 212, 255, 0.35);
 }}
-
 .card-img-container {{
     width: 100%;
     height: 170px;
@@ -337,7 +346,6 @@ div[data-testid="stAlert"] {{
     border-radius: 4px;
     border: 1px solid rgba(255, 255, 255, 0.12);
 }}
-
 .card-tags-bar {{
     position: absolute;
     left: 10px;
@@ -355,12 +363,46 @@ div[data-testid="stAlert"] {{
     border: 1px solid rgba(255, 255, 255, 0.12);
     color: #e0e8f0;
 }}
-
 .card-info {{
     padding: 10px 16px 12px 16px;
     display: flex;
     flex-direction: column;
     flex-grow: 1;
+}}
+.ships-name {{
+    font-family: 'Orbitron', sans-serif !important;
+    color: #ffffff !important;
+    font-weight: 700;
+    font-size: 1.2rem;
+    margin: 6px 0 2px 0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    line-height: 1.2;
+}}
+.card-brand {{
+    font-size: 0.8rem;
+    color: #9aa8b8;
+    text-transform: uppercase;
+    margin-bottom: 2px;
+}}
+.card-role-info {{
+    font-size: 0.85rem;
+    color: #c5d0dd;
+    text-transform: uppercase;
+    padding-top: 2px;
+}}
+.ship-price-value {{
+    font-family: 'Orbitron', sans-serif !important;
+    font-weight: 700;
+    font-size: 1.05rem;
+    text-transform: uppercase;
+    margin-top: 2px;
+    text-align: right;
+    min-width: 120px;
+    color: #00d4ff;
+}}
+.ship-price-value.auec-price {{
+    color: #30e8ff;
 }}
 .price-box {{
     display: flex;
@@ -371,15 +413,14 @@ div[data-testid="stAlert"] {{
     border-top: 1px solid #122433;
 }}
 
+/* Bouton de sélection sous la carte */
 .card-footer-button {{
     margin-top: 0;
 }}
-
-/* Bouton de sélection sous la carte (intégré visuellement) */
 div.card-footer-button > div.stButton > button {{
     width: 100%;
     border-radius: 0 0 8px 8px;
-    background: linear-gradient(90deg, #00d4ff, #30e8ff); 
+    background: linear-gradient(90deg, #00d4ff, #30e8ff);
     color: #041623;
     font-family: 'Orbitron', sans-serif;
     font-size: 0.8rem;
@@ -393,7 +434,7 @@ div.card-footer-button > div.stButton > button:hover {{
     box-shadow: 0 0 12px rgba(0, 212, 255, 0.75);
 }}
 
-/* Boutons généraux (hors cartes) */
+/* Boutons généraux */
 div.stButton > button {{
     background: #0e1117;
     color: #e0e0e0;
@@ -442,35 +483,9 @@ def render_sidebar():
             "<h2 style='text-align: left; color: #fff !important; font-size: 1.5em; border:none;'>💠 PIONEER</h2>",
             unsafe_allow_html=True,
         )
-        st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
 
-        if not st.session_state.current_pilot:
-            st.caption("CONNEXION > ACCÈS LOGISTIQUE")
-            with st.form("auth_form"):
-                pseudo = st.text_input("ID", key="auth_pseudo")
-                pin = st.text_input("PIN (4 chiffres)", type="password", max_chars=4, key="auth_pin")
-                if st.form_submit_button("INITIALISER", type="primary"):
-                    st.session_state.db = load_db_from_cloud() 
-                    
-                    if pseudo and len(pin) == 4 and pin.isdigit():
-                        if pseudo in st.session_state.db["users"]:
-                            if st.session_state.db["users"][pseudo] == pin:
-                                st.session_state.current_pilot = pseudo
-                                st.session_state.menu_nav = "FLOTTE CORPO"
-                                st.toast(f"Bienvenue, Pilote {pseudo} !", icon="🤝")
-                                st.rerun()
-                            else:
-                                st.error("PIN Erroné")
-                        else:
-                            st.session_state.db["users"][pseudo] = pin
-                            if save_db_to_cloud(st.session_state.db):
-                                st.session_state.current_pilot = pseudo
-                                st.success(f"Pilote {pseudo} créé et connecté.")
-                                st.session_state.menu_nav = "FLOTTE CORPO"
-                                st.rerun()
-                    else:
-                        st.error("Données invalides (ID et PIN 4 chiffres requis)")
-        else:
+        if st.session_state.current_pilot:
             st.markdown(
                 f"<div style='color:#00d4ff; font-weight:bold; margin-bottom:10px;'>PILOTE: {st.session_state.current_pilot}</div>",
                 unsafe_allow_html=True,
@@ -508,9 +523,88 @@ def render_sidebar():
                 st.session_state.catalog_page = 0
                 st.session_state.selected_ship_name = None
                 st.rerun()
+        else:
+            st.caption("Veuillez vous connecter depuis l'écran d'accueil.")
 
 
 # --- 7. PAGES DE L'APPLICATION ---
+
+
+def home_page():
+    """Page d'accueil avec connexion centrale."""
+    st.markdown(
+        """
+<div style="margin-top:40px;"></div>
+""",
+        unsafe_allow_html=True,
+    )
+    col_left, col_center, col_right = st.columns([1, 1.2, 1])
+
+    with col_center:
+        st.markdown(
+            """
+<div style="
+    background: rgba(4, 20, 35, 0.9);
+    border: 1px solid #163347;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.8);
+    border-radius: 14px;
+    padding: 30px 30px 24px 30px;
+">
+  <h2 style="font-family:'Orbitron'; color:#ffffff; text-transform:uppercase; margin-bottom:4px; border:none;">
+    PIONEER COMMAND
+  </h2>
+  <p style="color:#9aa8b8; margin-top:0; font-size:0.9rem; letter-spacing:1px;">
+    Console d'opérations logistiques • Accès restreint
+  </p>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+
+        with st.form("landing_login"):
+            st.markdown(
+                "<div style='height:12px;'></div>",
+                unsafe_allow_html=True,
+            )
+            st.subheader("Connexion pilote", divider="gray")
+            pseudo = st.text_input("Identifiant de pilote", key="landing_pseudo")
+            pin = st.text_input(
+                "PIN (4 chiffres)", type="password", max_chars=4, key="landing_pin"
+            )
+            login_btn = st.form_submit_button("SE CONNECTER", type="primary")
+
+            if login_btn:
+                if not pseudo or len(pin) != 4 or not pin.isdigit():
+                    st.error("ID requis et PIN 4 chiffres.")
+                else:
+                    st.session_state.db = normalize_db_schema(load_db_from_cloud())
+                    users = st.session_state.db["users"]
+                    if pseudo in users:
+                        if users[pseudo] == pin:
+                            st.session_state.current_pilot = pseudo
+                            st.session_state.menu_nav = "CATALOGUE"
+                            st.toast(f"Bienvenue, Pilote {pseudo} !", icon="🤝")
+                            st.rerun()
+                        else:
+                            st.error("PIN erroné.")
+                    else:
+                        users[pseudo] = pin
+                        if save_db_to_cloud(st.session_state.db):
+                            st.session_state.current_pilot = pseudo
+                            st.session_state.menu_nav = "CATALOGUE"
+                            st.success(f"Pilote {pseudo} créé et connecté.")
+                            st.rerun()
+
+        st.markdown(
+            """
+<p style="text-align:center; font-size:0.8rem; color:#76869a; margin-top:6px;">
+  Astuce : votre flotte restera sauvegardée tant que vous utilisez le même ID + PIN.
+</p>
+""",
+            unsafe_allow_html=True,
+        )
+
+
 def catalogue_page():
     col_filters, col_main_catalogue, col_commander = st.columns([1, 3.5, 1.5])
 
@@ -525,7 +619,6 @@ def catalogue_page():
             index=0 if st.session_state.selected_source == "STORE" else 1,
             horizontal=False,
             key="purchase_source_radio",
-            on_change=lambda: st.session_state.update(selected_ship_name=None, catalog_page=0)
         )
         st.session_state.selected_source = purchase_source
 
@@ -535,7 +628,6 @@ def catalogue_page():
             insurance_options,
             index=insurance_options.index(st.session_state.selected_insurance),
             key="insurance_selectbox",
-            on_change=lambda: st.session_state.update(selected_ship_name=None)
         )
         st.session_state.selected_insurance = selected_insurance
 
@@ -553,13 +645,11 @@ def catalogue_page():
                     )
                 )
             ),
-            on_change=lambda: st.session_state.update(catalog_page=0)
         )
 
         all_ships = sorted(list(SHIPS_DB.keys()))
         search_selection = st.multiselect(
-            "RECHERCHE", all_ships, placeholder="Tapez le nom...",
-            on_change=lambda: st.session_state.update(catalog_page=0)
+            "RECHERCHE", all_ships, placeholder="Tapez le nom..."
         )
 
     # --- LOGIQUE DE FILTRAGE ---
@@ -585,7 +675,7 @@ def catalogue_page():
         st.session_state.catalog_page = 0
     if st.session_state.catalog_page < 0:
         st.session_state.catalog_page = 0
-        
+
     start = st.session_state.catalog_page * ITEMS_PER_PAGE
     current_items = items[start : start + ITEMS_PER_PAGE]
 
@@ -597,7 +687,11 @@ def catalogue_page():
         c_prev, c_txt, c_next = st.columns([1, 4, 1])
         if total_pages > 1:
             with c_prev:
-                if st.button("◄ PRÉC.", key="p1", disabled=(st.session_state.catalog_page == 0)):
+                if st.button(
+                    "◄ PRÉC.",
+                    key="p1",
+                    disabled=(st.session_state.catalog_page == 0),
+                ):
                     st.session_state.catalog_page -= 1
                     st.rerun()
             with c_txt:
@@ -616,26 +710,29 @@ def catalogue_page():
 
         st.markdown("---")
 
-        # Affichage des cartes (2 par ligne)
-        cols = st.columns(2)
-        for i, (name, data) in enumerate(current_items):
-            with cols[i % 2]:
-                img_b64 = get_local_img_as_base64(data.get("img", ""))
+        if not current_items:
+            st.info("Aucun vaisseau ne correspond aux filtres sélectionnés.")
+        else:
+            # 2 cartes par ligne
+            cols = st.columns(2)
+            for i, (name, data) in enumerate(current_items):
+                with cols[i % 2]:
+                    img_b64 = get_local_img_as_base64(data.get("img", ""))
 
-                if purchase_source == "STORE":
-                    price_display = f"${data.get('price', 0):,.2f} USD"
-                    price_class = "usd-price"
-                else:
-                    price_display = f"{data.get('auec_price', 0):,.0f} aUEC"
-                    price_class = "auec-price"
+                    if purchase_source == "STORE":
+                        price_display = f"${data.get('price', 0):,.2f} USD"
+                        price_class = "usd-price"
+                    else:
+                        price_display = f"{data.get('auec_price', 0):,.0f} aUEC"
+                        price_class = "auec-price"
 
-                role = data.get("role", "Inconnu")
-                brand = data.get("brand", "N/A")
+                    role = data.get("role", "Inconnu")
+                    brand = data.get("brand", "N/A")
 
-                is_selected = st.session_state.selected_ship_name == name
-                selected_class = "selected-card" if is_selected else ""
+                    is_selected = st.session_state.selected_ship_name == name
+                    selected_class = "selected-card" if is_selected else ""
 
-                card_html = f"""
+                    card_html = f"""
 <div class="catalog-card-wrapper">
   <div class="catalog-card {selected_class}">
     <div class="card-img-container">
@@ -656,18 +753,19 @@ def catalogue_page():
   </div>
 </div>
 """
-                st.markdown(card_html, unsafe_allow_html=True)
+                    st.markdown(card_html, unsafe_allow_html=True)
 
-                st.markdown("<div class='card-footer-button'>", unsafe_allow_html=True)
-                if st.button(
-                    "Sélectionner ce vaisseau",
-                    key=f"select_{name}",
-                    use_container_width=True,
-                    on_click=select_ship,
-                    args=(name, purchase_source, selected_insurance)
-                ):
-                    st.rerun()
-                st.markdown("</div>", unsafe_allow_html=True)
+                    st.markdown(
+                        "<div class='card-footer-button'>", unsafe_allow_html=True
+                    )
+                    if st.button(
+                        "Sélectionner ce vaisseau",
+                        key=f"select_{name}",
+                        use_container_width=True,
+                    ):
+                        select_ship(name, purchase_source, selected_insurance)
+                        st.rerun()
+                    st.markdown("</div>", unsafe_allow_html=True)
 
     # --- COLONNE 3: ZONE D'ENREGISTREMENT DYNAMIQUE ---
     with col_commander:
@@ -714,18 +812,20 @@ def catalogue_page():
                 unsafe_allow_html=True,
             )
 
-            if st.button(
-                f"✅ ENREGISTRER {selected_name} DANS MON HANGAR",
-                type="primary",
-                use_container_width=True,
-                key="confirm_add_button",
-                on_click=add_ship_action,
-            ):
-                pass
-
+            if st.session_state.current_pilot:
+                if st.button(
+                    f"✅ ENREGISTRER {selected_name} DANS MON HANGAR",
+                    type="primary",
+                    use_container_width=True,
+                ):
+                    add_ship_action()
+            else:
+                st.info("Connectez-vous pour enregistrer ce vaisseau dans votre hangar.")
         else:
             if st.session_state.current_pilot:
-                st.info("Sélectionnez un vaisseau dans le registre pour afficher les options d'enregistrement.")
+                st.info(
+                    "Sélectionnez un vaisseau dans le registre pour afficher les options d'enregistrement."
+                )
             else:
                 st.info("Connectez-vous pour enregistrer un vaisseau.")
 
@@ -733,9 +833,8 @@ def catalogue_page():
             st.caption("Instructions:")
             st.markdown("* Choisissez la source et l'assurance à gauche.")
             st.markdown("* Cliquez sur le bouton sous la carte pour le sélectionner.")
-            
             if st.session_state.current_pilot:
-                 st.markdown("* Confirmez l'enregistrement ici.")
+                st.markdown("* Confirmez l'enregistrement ici.")
 
 
 def my_hangar_page():
@@ -744,7 +843,9 @@ def my_hangar_page():
     st.markdown("---")
 
     my_fleet = [
-        s for s in st.session_state.db["fleet"] if s["Propriétaire"] == st.session_state.current_pilot
+        s
+        for s in st.session_state.db["fleet"]
+        if s["Propriétaire"] == st.session_state.current_pilot
     ]
 
     if not my_fleet:
@@ -753,8 +854,17 @@ def my_hangar_page():
 
     df_my = pd.DataFrame(my_fleet)
     df_my["Supprimer"] = False
-    
-    df_my['id'] = df_my['id'].astype(int) 
+
+    if "Source" not in df_my.columns:
+        st.error(
+            "Données de flotte incomplètes (colonne 'Source' manquante). "
+            "Ajoutez un nouveau vaisseau depuis le catalogue pour régénérer la structure."
+        )
+        return
+
+    if "id" not in df_my.columns:
+        df_my["id"] = range(1, len(df_my) + 1)
+    df_my["id"] = df_my["id"].astype(int)
 
     editable_columns = {
         "Dispo": st.column_config.CheckboxColumn("OPÉRATIONNEL ?", width="small"),
@@ -767,8 +877,8 @@ def my_hangar_page():
         ),
         "Prix_USD": st.column_config.NumberColumn("VALEUR USD", format="$%,.0f"),
         "Prix_aUEC": st.column_config.NumberColumn("COÛT aUEC", format="%,.0f"),
-        "id": None, 
-        "Image": None, 
+        "id": None,
+        "Image": None,
         "Propriétaire": None,
     }
 
@@ -778,46 +888,56 @@ def my_hangar_page():
         "❗ Utilisez **ACTUALISER** pour synchroniser les changements (Disponibilité / Suppression / Assurance) avec la base de données centrale."
     )
 
-    # --- 1. HANGAR STORE (Achat Réel) ---
+    # --- HANGAR STORE ---
     df_store = df_my[df_my["Source"] == "STORE"].reset_index(drop=True).copy()
     df_store_display = df_store.drop(columns=columns_to_drop, errors="ignore")
-    
+
     st.markdown("## 💰 HANGAR STORE (Propriété USD)")
 
     if not df_store.empty:
-        total_usd = df_store["Prix_USD"].sum()
+        total_usd = pd.to_numeric(df_store["Prix_USD"], errors="coerce").fillna(0).sum()
         col_usd, col_toggle_usd = st.columns([3, 1])
         show_usd = col_toggle_usd.toggle(
             "Afficher Valorisation Totale (USD)", value=False, key="toggle_usd"
         )
-        col_usd.metric("VALORISATION STORE", f"${total_usd:,.0f}" if show_usd else "---")
+        col_usd.metric(
+            "VALORISATION STORE", f"${total_usd:,.0f}" if show_usd else "---"
+        )
 
         edited_store_display = st.data_editor(
             df_store_display,
             column_config=editable_columns,
             disabled=[
-                "Vaisseau", "Marque", "Rôle", "Visuel", "Source", "Prix_aUEC", "Prix_USD",
+                "Vaisseau",
+                "Marque",
+                "Rôle",
+                "Visuel",
+                "Source",
+                "Prix_aUEC",
+                "Prix_USD",
             ],
             hide_index=True,
             use_container_width=True,
             key="store_hangar_editor",
         )
         edited_store = edited_store_display.copy()
-        edited_store['id'] = df_store['id']
+        edited_store["id"] = df_store["id"]
     else:
         st.info("Aucun vaisseau provenant du Store dans votre hangar.")
         edited_store = pd.DataFrame()
 
     st.markdown("---")
 
-    # --- 2. HANGAR INGAME (Achat aUEC) ---
+    # --- HANGAR INGAME ---
     df_ingame = df_my[df_my["Source"] == "INGAME"].reset_index(drop=True).copy()
     df_ingame_display = df_ingame.drop(columns=columns_to_drop, errors="ignore")
 
     st.markdown("## 💸 HANGAR INGAME (Acquisition aUEC)")
 
     if not df_ingame.empty:
-        total_auec = df_ingame["Prix_aUEC"].sum()
+        total_auec = (
+            pd.to_numeric(df_ingame["Prix_aUEC"], errors="coerce").fillna(0).sum()
+        )
         col_auec, col_toggle_auec = st.columns([3, 1])
         show_auec = col_toggle_auec.toggle(
             "Afficher Coût Total (aUEC)", value=False, key="toggle_auec"
@@ -830,22 +950,28 @@ def my_hangar_page():
             df_ingame_display,
             column_config=editable_columns,
             disabled=[
-                "Vaisseau", "Marque", "Rôle", "Visuel", "Source", "Prix_aUEC", "Prix_USD",
+                "Vaisseau",
+                "Marque",
+                "Rôle",
+                "Visuel",
+                "Source",
+                "Prix_aUEC",
+                "Prix_USD",
             ],
             hide_index=True,
             use_container_width=True,
             key="ingame_hangar_editor",
         )
         edited_ingame = edited_ingame_display.copy()
-        edited_ingame['id'] = df_ingame['id']
+        edited_ingame["id"] = df_ingame["id"]
     else:
         st.info("Aucun vaisseau acheté en jeu dans votre hangar.")
         edited_ingame = pd.DataFrame()
 
-    # --- 3. SAUVEGARDE GLOBALE ---
+    # --- SAUVEGARDE GLOBALE ---
     st.markdown("---")
-    
-    combined_edited = pd.concat([edited_store, edited_ingame])
+
+    combined_edited = pd.concat([edited_store, edited_ingame], ignore_index=True)
 
     if st.button(
         "💾 ACTUALISER LA FLOTTE (SAUVEGARDER & SUPPRIMER)",
@@ -855,7 +981,7 @@ def my_hangar_page():
         if not combined_edited.empty:
             process_fleet_updates(combined_edited)
         else:
-             st.info("Aucune modification significative à enregistrer.")
+            st.info("Aucune modification significative à enregistrer.")
 
 
 def corpo_fleet_page():
@@ -869,30 +995,29 @@ def corpo_fleet_page():
         return
 
     df_global = pd.DataFrame(st.session_state.db["fleet"])
-
-    # Vérification robuste des colonnes pour éviter KeyError:
-    required_cols = ["Source", "Prix_USD", "Prix_aUEC", "Dispo", "Marque", "Rôle", "Vaisseau"]
-    missing_cols = [col for col in required_cols if col not in df_global.columns]
-    
-    if missing_cols:
-        # Affichage d'un avertissement détaillé et sortie propre
-        st.error(
-            f"Erreur de données: Le DataFrame de flotte est incomplet (colonnes manquantes: {', '.join(missing_cols)}). "
-            f"Impossible d'afficher les statistiques. Veuillez ajouter un vaisseau complet pour initialiser la DB locale."
-        )
-        return
+    df_global = normalize_db_schema({"fleet": df_global.to_dict("records")})["fleet"]
+    df_global = pd.DataFrame(df_global)
 
     total_ships = len(df_global)
-    total_dispo = df_global["Dispo"].sum() 
+    total_dispo = int(df_global["Dispo"].sum())
     total_pilots = len(st.session_state.db["users"])
 
-    # Calcul sécurisé des totaux
-    total_value_usd = df_global[df_global["Source"] == "STORE"]["Prix_USD"].sum()
-    total_value_auec = df_global[df_global["Source"] == "INGAME"]["Prix_aUEC"].sum()
+    total_value_usd = (
+        pd.to_numeric(
+            df_global[df_global["Source"] == "STORE"]["Prix_USD"], errors="coerce"
+        )
+        .fillna(0)
+        .sum()
+    )
+    total_value_auec = (
+        pd.to_numeric(
+            df_global[df_global["Source"] == "INGAME"]["Prix_aUEC"], errors="coerce"
+        )
+        .fillna(0)
+        .sum()
+    )
 
-    # Correction de l'erreur d'indexation
-    col1, col2, col3, col4, col5 = st.columns((1, 1, 1, 1, 1))
-
+    col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("PILOTES", total_pilots)
     col2.metric("FLOTTE TOTALE", total_ships)
     col3.metric("OPÉRATIONNELS", total_dispo)
@@ -964,19 +1089,17 @@ def corpo_fleet_page():
         "✅ Afficher uniquement les vaisseaux opérationnels", value=False
     )
 
+    display_df = df_global.copy()
     if show_only_dispo:
-        display_df = df_global[df_global["Dispo"] == True].copy()
-    else:
-        display_df = df_global.copy()
+        display_df = display_df[display_df["Dispo"] == True].copy()
 
     display_df["Statut"] = display_df["Dispo"].apply(
         lambda x: "✅ DISPONIBLE" if x else "⛔ NON ASSIGNÉ"
     )
-    # Affichage du prix corrigé et sécurisé
     display_df["Prix_Acquisition"] = display_df.apply(
-        lambda row: f"{row['Prix_aUEC']:,.0f} aUEC" 
+        lambda row: f"{row['Prix_aUEC']:,.0f} aUEC"
         if row["Source"] == "INGAME"
-        else f"${row['Prix_USD']:,.0f} USD", 
+        else f"${row['Prix_USD']:,.0f} USD",
         axis=1,
     )
 
@@ -991,7 +1114,12 @@ def corpo_fleet_page():
             "Vaisseau": st.column_config.TextColumn("Modèle", width="medium"),
             "Rôle": st.column_config.TextColumn("Classification", width="medium"),
             "Prix_Acquisition": st.column_config.TextColumn("Prix", width="medium"),
-            "Image": None, "Prix_USD": None, "Prix_aUEC": None, "id": None, "Marque": None, "Dispo": None,
+            "Image": None,
+            "Prix_USD": None,
+            "Prix_aUEC": None,
+            "id": None,
+            "Marque": None,
+            "Dispo": None,
         },
         use_container_width=True,
         hide_index=True,
@@ -1021,9 +1149,17 @@ def corpo_fleet_page():
                 st.warning("Visuel non disponible localement.")
 
         with col_details:
-            prix_usd_format = f"${selected_row['Prix_USD']:,.0f}" if selected_row.get('Prix_USD') is not None else "N/A"
-            prix_auec_format = f"{selected_row['Prix_aUEC']:,.0f} aUEC" if selected_row.get('Prix_aUEC') is not None else "N/A"
-            
+            prix_usd_format = (
+                f"${selected_row['Prix_USD']:,.0f}"
+                if selected_row.get("Prix_USD") is not None
+                else "N/A"
+            )
+            prix_auec_format = (
+                f"{selected_row['Prix_aUEC']:,.0f} aUEC"
+                if selected_row.get("Prix_aUEC") is not None
+                else "N/A"
+            )
+
             st.markdown(
                 f"""
 <div style="background:rgba(0,0,0,0.5); padding:20px; border-radius:10px; border:1px solid #333;">
@@ -1046,30 +1182,19 @@ def corpo_fleet_page():
             )
 
 
-# --- 8. APP PRINCIPALE (Accès au Catalogue par défaut) ---
+# --- 8. APP PRINCIPALE ---
 st.title("PIONEER COMMAND | CONSOLE D'OPÉRATIONS")
 
 render_sidebar()
 
-# Logique de navigation principale modifiée: le catalogue est la page par défaut, accessible à tous.
-if st.session_state.menu_nav == "CATALOGUE":
-    catalogue_page()
-    
-elif not st.session_state.current_pilot:
-    # Affiche le message de verrouillage si l'utilisateur n'est pas connecté et n'est pas sur la page CATALOGUE
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    st.markdown(
-        """
-<div style="text-align: center; padding: 40px; background: rgba(20, 20, 20, 0.8); border-top: 2px solid #ff4b4b; border-bottom: 2px solid #ff4b4b;">
-  <h2 style="color: #ff4b4b !important; font-size: 1.8em;">SYSTÈME VERROUILLÉ</h2>
-  <p style="color: #aaa; letter-spacing: 1px; margin-top: 10px;">IDENTIFICATION REQUISE POUR ACCÈS AUX DONNÉES LOGISTIQUES.</p>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-    
-elif st.session_state.menu_nav == "MON HANGAR":
-    my_hangar_page()
-    
-elif st.session_state.menu_nav == "FLOTTE CORPO":
-    corpo_fleet_page()
+if not st.session_state.current_pilot:
+    # Page d'accueil / login
+    home_page()
+else:
+    # Navigation interne
+    if st.session_state.menu_nav == "CATALOGUE":
+        catalogue_page()
+    elif st.session_state.menu_nav == "MON HANGAR":
+        my_hangar_page()
+    elif st.session_state.menu_nav == "FLOTTE CORPO":
+        corpo_fleet_page()
