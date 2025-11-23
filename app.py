@@ -253,8 +253,6 @@ def refresh_prices_from_catalog(source_type: str):
             st.success(f"✅ Prix {source_type} mis à jour à partir du catalogue vaisseaux.")
         else:
             st.error("❌ Erreur lors de la sauvegarde après la mise à jour des prix.")
-    else:
-        st.info("Aucune mise à jour de prix nécessaire.")
 
     st.rerun() # Rerun forcer pour rafraîchir l'affichage
 
@@ -936,7 +934,7 @@ def my_hangar_page():
     df_my["Prix_USD"] = pd.to_numeric(df_my["Prix_USD"], errors="coerce").fillna(0)
     df_my["Prix_aUEC"] = pd.to_numeric(df_my["Prix_aUEC"], errors="coerce").fillna(0)
 
-    # Colonnes à masquer dans les tableaux
+    # Colonnes nécessaires mais masquées
     columns_internal = ["id", "Image", "Propriétaire", "Prix_USD", "Prix_aUEC", "Prix"]
     
     # 1. Calcul de la colonne de prix unique pour l'affichage
@@ -999,7 +997,6 @@ def my_hangar_page():
     
     # --- HANGAR STORE ---
     df_store = df_my[df_my["Source"] == "STORE"].reset_index(drop=True).copy()
-    # Utiliser seulement les colonnes visibles + la nouvelle colonne Prix_Acquisition
     df_store_display = df_store[columns_for_display].copy()
 
     st.markdown("## 💰 HANGAR STORE (Propriété USD)")
@@ -1282,12 +1279,14 @@ def corpo_fleet_page():
             "Vaisseau": st.column_config.TextColumn("Modèle", width="medium"),
             "Rôle": st.column_config.TextColumn("Classification", width="medium"),
             "Prix_Acquisition": st.column_config.TextColumn("Prix", width="medium"),
+            # Colonnes à masquer, incluant l'ancienne colonne "Prix"
             "Image": None,
             "Prix_USD": None,
             "Prix_aUEC": None,
             "id": None,
             "Marque": None,
             "Dispo": None,
+            "Prix": None, # <--- CORRECTION: Masquer la colonne "Prix" redondante
         },
         use_container_width=True,
         hide_index=True,
