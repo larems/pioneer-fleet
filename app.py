@@ -341,7 +341,7 @@ def process_fleet_updates(edited_df: pd.DataFrame):
         )
 
 
-# --- 4. CSS (Styles optimisés) (CORRIGÉ) ---
+# --- 4. CSS (Styles optimisés) (CORRIGÉ ET SIMPLIFIÉ) ---
 bg_img_code = get_local_img_as_base64(BACKGROUND_IMAGE)
 
 st.markdown(
@@ -426,21 +426,26 @@ p, div, span, label, .stMarkdown, .stText {{
     left: 10px;
     z-index: 2;
 }}
-.card-checkbox-overlay .stCheckbox > label {{
+
+/* Style appliqué au label personnalisé (la classe 'custom-ship-label' est injectée dans le HTML) */
+.custom-ship-label {{
     background: rgba(4, 20, 35, 0.9);
     padding: 8px 12px;
     border-radius: 6px;
     border: 1px solid #00d4ff;
     box-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
+    cursor: pointer;
+    display: inline-block;
     transition: all 0.2s;
 }}
-.card-checkbox-overlay .stCheckbox > label:hover {{
-    background: #00d4ff;
-    color: #041623;
+.custom-ship-label:hover {{
+    background: #00d4ff; /* Le hover sera géré ici ou par le script, mais la base est là */
 }}
+
 /* IMPORTANT: Masquer la case à cocher native de Streamlit pour n'afficher que le label stylisé */
-div[data-testid^="stCheckbox"] > label > div:first-child {{
-    display: none !important;
+/* Ceci doit cibler le parent du label pour masquer le widget complet (texte et case) */
+div[data-testid^="stCheckbox"] > label {{
+    display: none !important; /* Masquer le label Streamlit natif */
 }}
 
 .card-img-container {{
@@ -754,8 +759,7 @@ def catalogue_page():
                         # NOUVEAU: Case à cocher pour la sélection (widget Streamlit invisible)
                         checkbox_key = f"check_{name}"
                         
-                        # On place un widget Streamlit checkbox. Son état sera récupéré après soumission.
-                        # On le rend invisible/transparent via CSS pour qu'il soit sur la carte.
+                        # 1. Widget Streamlit (fonctionnalité)
                         is_selected = st.checkbox(
                             f"SÉLECTIONNER", 
                             key=checkbox_key, 
@@ -763,10 +767,8 @@ def catalogue_page():
                             label_visibility="collapsed", 
                         )
                         
-                        # On utilise le code HTML pour styliser le bloc.
+                        # 2. Styles dynamiques pour le label HTML
                         selected_class = "selected-card" if is_selected else ""
-                        
-                        # Définir le contenu du label personnalisé
                         label_text = f"✅ SÉLECTIONNÉ" if is_selected else "☐ SÉLECTIONNER"
                         label_color = '#041623' if is_selected else '#ffffff'
                         label_background = '#00d4ff' if is_selected else 'rgba(4, 20, 35, 0.9)'
@@ -776,18 +778,10 @@ def catalogue_page():
 <div class="catalog-card-wrapper">
   <div class="catalog-card {selected_class}">
     <div class="card-checkbox-overlay">
-        <div data-testid="stCheckbox">
-            </div>
         
-        <label for="{checkbox_key}" style="
+        <label for="{checkbox_key}" class="custom-ship-label" style="
             background: {label_background};
-            padding: 8px 12px;
-            border-radius: 6px;
-            border: 1px solid #00d4ff;
-            box-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
-            cursor: pointer;
-            display: inline-block;
-            transition: all 0.2s;
+            color: {label_color};
         ">
             <span style="font-family: 'Orbitron', sans-serif; font-weight: 700; color: {label_color}; text-transform: uppercase;">
                 {label_text}
