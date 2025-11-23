@@ -16,9 +16,10 @@ st.set_page_config(
 BACKGROUND_IMAGE = "assets/fondecransite.png"
 
 # --- 2. GESTION DATABASE (JSONBIN.IO) ---
-# NOTE: Remplacer les secrets par vos valeurs réelles si nécessaire
-JSONBIN_ID = "6921f0ded0ea881f40f9933f" 
-JSONBIN_KEY = "" # Remplacer par st.secrets.get("JSONBIN_KEY", "") en production
+# NOUVEL ID JSONBIN FOURNI PAR L'UTILISATEUR
+JSONBIN_ID = "6921f0ded0ea881f40f9433f" 
+# Clé MASTER KEY JSONBin.io (laissez vide pour lecture seule en mode dev)
+JSONBIN_KEY = "" 
 
 
 def normalize_db_schema(db: dict) -> dict:
@@ -48,12 +49,8 @@ def normalize_db_schema(db: dict) -> dict:
             default_auec = "Non achetable en jeu"
             
         ship.setdefault("Prix_aUEC", default_auec) 
-        
-        ship.setdefault("Assurance", "Standard")
-        ship.setdefault("Prix", None)
-        ship.setdefault("crew_max", 1) 
 
-        # --- MIGRATION ANCIEN CHAMP "Prix" -> Prix_USD / Prix_aUEC ---
+        # Si le champ 'Prix' legacy existe, on migre
         legacy_price = ship.get("Prix", None)
         if legacy_price not in (None, "", 0, 0.0):
             try:
@@ -74,6 +71,11 @@ def normalize_db_schema(db: dict) -> dict:
             current_auec_price = ship.get("Prix_aUEC")
             if ship.get("Source") == "INGAME" and isinstance(current_auec_price, (int, float)) and current_auec_price == 0:
                  ship["Prix_aUEC"] = legacy_price_clean
+
+        # Assurer les autres champs
+        ship.setdefault("Assurance", "Standard")
+        ship.setdefault("Prix", None)
+        ship.setdefault("crew_max", 1) 
     
     # Normalisation du user_data
     for pilot in db.get("users", {}).keys():
@@ -102,9 +104,11 @@ def load_db_from_cloud():
             data = response.json().get("record", {"users": {}, "fleet": []})
             return normalize_db_schema(data)
         else:
-            st.error(f"Erreur de chargement DB: Statut {response.status_code}.")
+            # Remplacement de st.error par st.exception pour un affichage plus clair de la trace
+            st.exception(f"Erreur de chargement DB: Statut {response.status_code}. Vérifiez l'ID: {JSONBIN_ID}")
+            return {"users": {}, "fleet": []}
     except requests.exceptions.RequestException as e:
-        st.error(f"Erreur réseau/timeout lors du chargement: {e}")
+        st.exception(f"Erreur réseau/timeout lors du chargement: {e}")
 
     return {"users": {}, "fleet": []}
 
@@ -602,7 +606,6 @@ def home_page():
                 if not pseudo or len(pin) != 4 or not pin.isdigit():
                     st.error("ID requis et PIN 4 chiffres.")
                 else:
-                    # NOTE: Tentative de recharger la DB pour s'assurer que les users sont à jour
                     st.session_state.db = normalize_db_schema(load_db_from_cloud())
                     users = st.session_state.db["users"]
                     if pseudo in users:
@@ -644,7 +647,6 @@ def catalogue_page():
 
     filtered = {}
     for name, data in SHIPS_DB.items():
-        # Le filtre INGAME fonctionne car ships_data.py force ingame: True pour tous les affichages
         if brand_filter != "Tous" and data.get("brand") != brand_filter: continue
         if search_selection and name not in search_selection: continue
         filtered[name] = data
@@ -832,7 +834,6 @@ def my_hangar_page():
 
     if not my_fleet:
         st.info("Hangar vide. Ajoutez des vaisseaux depuis le CATALOGUE.")
-        # Afficher la section d'acquisition même si le hangar est vide
         render_acquisition_tracking(current_auec_balance, final_target_name)
         return
     else:
@@ -861,9 +862,6 @@ def my_hangar_page():
         # Correction : Forcer la Base64 des images locales pour l'aperçu du tableau
         df_my['Visuel'] = df_my['Image'].apply(get_local_img_as_base64)
         
-        # Colonnes nécessaires pour la sauvegarde mais invisibles
-        columns_internal = ["id", "Image", "Propriétaire", "Prix_USD", "Prix_aUEC", "Prix"]
-        
         # 1. Calcul de la colonne de prix unique pour l'affichage
         df_my["Prix_Acquisition"] = df_my.apply(
             lambda row: (
@@ -880,7 +878,7 @@ def my_hangar_page():
 
         # Colonnes visibles dans l'ordre souhaité
         columns_for_display = [
-            "id", # Temporairement visible pour la fusion
+            "id", 
             "Vaisseau", 
             "Marque", 
             "Rôle", 
@@ -902,20 +900,18 @@ def my_hangar_page():
             "Dispo": st.column_config.CheckboxColumn("OPÉRATIONNEL ?", width="small"),
             "Supprimer": st.column_config.CheckboxColumn("SUPPRIMER", width="small"),
             "Visuel": st.column_config.ImageColumn("APERÇU", width="small"),
-            "Source": st.column_config.TextColumn("SOURCE", disabled=True, width="small"), # Rendre Source visible
+            "Source": st.column_config.TextColumn("SOURCE", disabled=True, width="small"), 
             "Assurance": st.column_config.SelectboxColumn(
                 "ASSURANCE",
                 options=["LTI", "10 Ans", "6 Mois", "2 Mois", "Standard"],
                 width="medium",
             ),
-            # Colonne Prix_Acquisition affichée comme texte pour garder le formatage monétaire unique
             "Prix_Acquisition": st.column_config.TextColumn("PRIX", disabled=True, width="small"),
             "Vaisseau": st.column_config.TextColumn("Vaisseau", disabled=True, width="medium"),
             "Marque": st.column_config.TextColumn("Marque", disabled=True, width="small"),
             "Rôle": st.column_config.TextColumn("Rôle", disabled=True, width="small"),
         }
         
-        # Colonnes à désactiver dans l'éditeur (sauf les champs modifiables)
         disabled_cols = [
             "Vaisseau",
             "Marque",
@@ -964,7 +960,7 @@ def my_hangar_page():
         st.markdown("## 💸 HANGAR INGAME (Acquisition aUEC)")
 
         if not df_ingame.empty:
-            total_aUEC = df_ingame["Prix_aUEC_Num"].sum() # Utilise la colonne nettoyée
+            total_aUEC = df_ingame["Prix_aUEC_Num"].sum() 
             col_aUEC, col_toggle_aUEC = st.columns([3, 1])
             show_aUEC = col_toggle_aUEC.toggle(
                 "Afficher Coût Total (aUEC)", value=False, key="toggle_aUEC"
@@ -1012,7 +1008,6 @@ def render_acquisition_tracking(current_auec_balance, final_target_name):
     st.markdown("---")
     st.markdown("## 🎯 SUIVI D'ACQUISITION FUTURE (aUEC)")
     
-    # Liste de tous les vaisseaux achetable en aUEC pour le sélecteur cible
     ingame_ships = sorted([name for name, data in SHIPS_DB.items() if data.get('auec_price') != "Non achetable en jeu"])
     ingame_options = ["— Sélectionner un objectif —"] + ingame_ships
     
@@ -1290,9 +1285,9 @@ def corpo_fleet_page():
 
     # 1. Regrouper les lignes pour la LISTE DÉTAILLÉE (Regrouper par Modèle, Classification, et Source - Ignorer l'Assurance pour la fusion)
     detail_data = display_df.groupby(['Vaisseau', 'Marque', 'Rôle', 'Source']).agg(
-        Pilotes=('Propriétaire', lambda x: ', '.join(sorted(x.unique()))), # JOINDRE LES PILOTES
-        Assurance=('Assurance', lambda x: ', '.join(sorted(x.unique()))), # JOINDRE LES ASSURANCES
-        Quantité=('Vaisseau', 'count'), # Nombre de ships par ligne
+        Pilotes=('Propriétaire', lambda x: ', '.join(sorted(x.unique()))), 
+        Assurance=('Assurance', lambda x: ', '.join(sorted(x.unique()))), 
+        Quantité=('Vaisseau', 'count'), 
         Crew_Max=('Crew_Max_Catalog', 'first'),
         Image=('Image', 'first'),
     ).reset_index()
@@ -1303,11 +1298,10 @@ def corpo_fleet_page():
     display_for_table['Modèle'] = detail_data['Vaisseau']
     display_for_table['Classification'] = detail_data['Rôle']
     display_for_table['Source'] = detail_data['Source']
-    display_for_table['Assurance'] = detail_data['Assurance'] # Liste des assurances fusionnées
+    display_for_table['Assurance'] = detail_data['Assurance'] 
     display_for_table['Crew Max'] = detail_data['Crew_Max']
     display_for_table['NB Ex.'] = detail_data['Quantité']
     
-    # Régénérer la Base64 en utilisant la colonne 'Image' (chemin local)
     display_for_table['Visuel'] = detail_data['Image'].apply(get_local_img_as_base64)
     
     # Calculer le Prix Affiché (du modèle)
