@@ -979,3 +979,7 @@ else:
 
     elif st.session_state.menu_nav == "FLOTTE CORPO":
         corpo_fleet_page()
+
+def home_page():
+    st.title("Bienvenue sur Pioneer Command")
+    st.write("Veuillez vous connecter via la barre latérale.")
