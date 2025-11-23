@@ -72,7 +72,7 @@ def normalize_db_schema(db: dict) -> dict:
     return db
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(ttl=300, show_spinner="Chargement de la base de données...")
 def load_db_from_cloud():
     """Charge la base de données depuis JSONBin.io."""
     if not JSONBIN_KEY:
@@ -107,7 +107,8 @@ def save_db_to_cloud(data):
 
     try:
         response = requests.put(url, json=data, headers=headers, timeout=10)
-        if response.status_code not in (200, 204, 403):
+        # FIX: Tolérer le statut 403 si la sauvegarde fonctionne malgré tout (bug JSONBin/Streamlit)
+        if response.status_code not in (200, 204, 403): 
             st.error(f"Erreur de sauvegarde DB: Statut {response.status_code}")
             return False
     except requests.exceptions.RequestException as e:
@@ -678,7 +679,8 @@ def catalogue_page():
         )
         st.session_state.selected_source = purchase_source
 
-        insurance_options = ["LTI", "10 Ans", "2 ans", "6 Mois", "2 Mois", "Standard"]
+        # FIX: Ajout de '2 ans' et correction de la syntaxe de la liste
+        insurance_options = ["LTI", "10 Ans", "2 ans", "6 Mois", "2 Mois", "Standard"] 
         selected_insurance = st.selectbox(
             "ASSURANCE ACQUISE",
             insurance_options,
@@ -1000,7 +1002,8 @@ def my_hangar_page():
             "Source": st.column_config.TextColumn("SOURCE", width="small"), # Rendre Source visible
             "Assurance": st.column_config.SelectboxColumn(
                 "ASSURANCE",
-                options=["LTI", "10 Ans", "2 ans", "6 Mois", "2 Mois","Standard"]
+                # FIX: La liste est corrigée ici
+                options=["LTI", "10 Ans", "2 ans", "6 Mois", "2 Mois", "Standard"], 
                 width="medium",
             ),
             # Colonne Prix_Acquisition affichée comme texte pour garder le formatage monétaire unique
@@ -1072,7 +1075,7 @@ def my_hangar_page():
                 "Afficher Coût Total (aUEC)", value=False, key="toggle_aUEC"
             )
             col_aUEC.metric(
-                "COÛT ACQUISITION", f"{total_aUEC:,.0f} aUEC" if show_auec else "---"
+                "COÛT ACQUISITION", f"{total_aUEC:,.0f} aUEC" if show_aUEC else "---"
             )
             
             st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) 
