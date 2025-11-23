@@ -6,14 +6,15 @@ import os
 import json
 import requests
 import time
-from ships_data import SHIPS_DB # Assurez-vous que ships_data.py existe et est un dictionnaire
+from ships_data import SHIPS_DB
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="PIONEER COMMAND | OPS CONSOLE", layout="wide", page_icon="💠")
 BACKGROUND_IMAGE = "assets/fondecransite.png"
 
 # --- 2. GESTION DATABASE (JSONBIN.IO) ---
-# Activation pour la production: lecture des clés depuis l'environnement sécurisé (st.secrets)
+# Configuration pour la production: lecture des clés depuis l'environnement sécurisé (st.secrets)
+# N'oubliez pas de configurer la JSONBIN_KEY dans vos secrets de déploiement !
 JSONBIN_ID = st.secrets.get("JSONBIN_ID", "6921f0ded0ea881f40f9433f")
 JSONBIN_KEY = st.secrets.get("JSONBIN_KEY", "")
 
@@ -876,12 +877,14 @@ def corpo_fleet_page():
     total_value_usd = df_global[df_global["Source"] == "STORE"]["Prix_USD"].sum()
     total_value_auec = df_global[df_global["Source"] == "INGAME"]["Prix_aUEC"].sum()
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("PILOTES", total_pilots)
-    c2.metric("FLOTTE TOTALE", total_ships)
-    c3.metric("OPÉRATIONNELS", total_dispo)
-    c4.metric("VALEUR USD", f"${total_value_usd:,.0f}")
-    c5.metric("COÛT aUEC", f"{total_value_auec:,.0f} aUEC")
+    # Correction de l'erreur de colonnes (IndexError: tuple index out of range)
+    col1, col2, col3, col4, col5 = st.columns((1, 1, 1, 1, 1))
+
+    col1.metric("PILOTES", total_pilots)
+    col2.metric("FLOTTE TOTALE", total_ships)
+    col3.metric("OPÉRATIONNELS", total_dispo)
+    col4.metric("VALEUR USD", f"${total_value_usd:,.0f}")
+    col5.metric("COÛT aUEC", f"{total_value_auec:,.0f} aUEC")
 
     st.markdown("---")
 
