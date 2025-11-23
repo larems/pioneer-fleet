@@ -5,7 +5,6 @@ import base64
 import os
 import requests
 import time
-# Assurez-vous que ships_data.py est dans le même dossier
 from ships_data import SHIPS_DB
 
 # --- 1. CONFIGURATION ---
@@ -39,7 +38,6 @@ def normalize_db_schema(db: dict) -> dict:
         ship.setdefault("Image", "")
         ship.setdefault("Visuel", "")
         ship.setdefault("Source", "STORE")
-        # S'assurer que les prix sont stockés comme des nombres (même si JSONBin les lit parfois comme str)
         ship.setdefault("Prix_USD", 0.0)
         ship.setdefault("Prix_aUEC", 0.0)
         ship.setdefault("Assurance", "Standard")
@@ -293,6 +291,19 @@ p, div, span, label, .stMarkdown, .stText {{
     font-family: 'Rajdhani', sans-serif !important;
     color: #e0e0e0;
 }}
+
+/* AJOUT STYLES POUR PRIX ACTIF DANS DATA EDITOR */
+/* Colonne VALEUR USD affichée en vert */
+.stDataFrame td:nth-child(7), .stDataFrame th:nth-child(7) {{
+    color: #00ff00 !important; /* Couleur verte */
+    font-weight: bold;
+}}
+/* Colonne COÛT aUEC affichée en vert */
+.stDataFrame td:nth-child(8), .stDataFrame th:nth-child(8) {{
+    color: #30e8ff !important; /* Couleur turquoise */
+    font-weight: bold;
+}}
+
 
 /* CARTES CATALOGUE */
 .catalog-card-wrapper {{
@@ -864,11 +875,14 @@ def my_hangar_page():
         df_my["id"] = range(1, len(df_my) + 1)
     df_my["id"] = df_my["id"].astype(int)
 
-    # CORRECTION DES PRIX: Assurer la conversion des colonnes en numérique pour les calculs de totaux
+    # CORRECTION DES PRIX: Assurer la conversion des colonnes en numérique au début
     df_my["Prix_USD"] = pd.to_numeric(df_my["Prix_USD"], errors="coerce").fillna(0)
     df_my["Prix_aUEC"] = pd.to_numeric(df_my["Prix_aUEC"], errors="coerce").fillna(0)
 
-    editable_columns = {
+    # --- CONFIGURATION DES COLONNES POUR UN AFFICHAGE CLAIR DU PRIX ACTIF ---
+    # Col 7 = Prix_USD, Col 8 = Prix_aUEC
+
+    editable_columns_base = {
         "Dispo": st.column_config.CheckboxColumn("OPÉRATIONNEL ?", width="small"),
         "Supprimer": st.column_config.CheckboxColumn("SUPPRIMER", width="small"),
         "Visuel": st.column_config.ImageColumn("APERÇU", width="small"),
@@ -877,13 +891,12 @@ def my_hangar_page():
             options=["LTI", "10 Ans", "6 Mois", "2 Mois", "Standard"],
             width="medium",
         ),
-        "Prix_USD": st.column_config.NumberColumn("VALEUR USD", format="$%,.0f"),
-        "Prix_aUEC": st.column_config.NumberColumn("COÛT aUEC", format="%,.0f"),
         "id": None,
         "Image": None,
         "Propriétaire": None,
     }
-
+    
+    # Colonnes à masquer dans les deux tableaux
     columns_to_drop = ["id", "Image", "Propriétaire"]
 
     st.caption(
@@ -893,11 +906,23 @@ def my_hangar_page():
     # --- HANGAR STORE ---
     df_store = df_my[df_my["Source"] == "STORE"].reset_index(drop=True).copy()
     df_store_display = df_store.drop(columns=columns_to_drop, errors="ignore")
+    
+    # Configuration spécifique pour le Store: USD actif (vert), aUEC désactivé (pas de couleur)
+    editable_columns_store = editable_columns_base.copy()
+    editable_columns_store["Prix_USD"] = st.column_config.NumberColumn(
+        "VALEUR USD", 
+        format="$%,.0f", 
+        # Configuration CSS : La 7ème colonne (Prix_USD) sera verte par défaut (voir section 4. CSS)
+    )
+    editable_columns_store["Prix_aUEC"] = st.column_config.NumberColumn(
+        "COÛT aUEC", 
+        format="%,.0f",
+        # Affichage du coût aUEC mais sans surlignage par défaut (désactivé plus bas)
+    )
 
     st.markdown("## 💰 HANGAR STORE (Propriété USD)")
 
     if not df_store.empty:
-        # Les prix sont déjà numériques grâce à la correction ci-dessus
         total_usd = df_store["Prix_USD"].sum()
         col_usd, col_toggle_usd = st.columns([3, 1])
         show_usd = col_toggle_usd.toggle(
@@ -909,15 +934,16 @@ def my_hangar_page():
 
         edited_store_display = st.data_editor(
             df_store_display,
-            column_config=editable_columns,
+            column_config=editable_columns_store,
             disabled=[
                 "Vaisseau",
                 "Marque",
                 "Rôle",
                 "Visuel",
                 "Source",
-                "Prix_aUEC",
-                "Prix_USD",
+                # Désactiver la colonne Prix_aUEC pour le store (colonne 8)
+                "Prix_aUEC", 
+                "Prix_USD", # Désactiver la modification de la valeur USD
             ],
             hide_index=True,
             use_container_width=True,
@@ -934,11 +960,23 @@ def my_hangar_page():
     # --- HANGAR INGAME ---
     df_ingame = df_my[df_my["Source"] == "INGAME"].reset_index(drop=True).copy()
     df_ingame_display = df_ingame.drop(columns=columns_to_drop, errors="ignore")
+    
+    # Configuration spécifique pour Ingame: aUEC actif (turquoise), USD désactivé (pas de couleur)
+    editable_columns_ingame = editable_columns_base.copy()
+    editable_columns_ingame["Prix_USD"] = st.column_config.NumberColumn(
+        "VALEUR USD", 
+        format="$%,.0f", 
+        # Affichage de la valeur USD mais sans surlignage par défaut (désactivé plus bas)
+    )
+    editable_columns_ingame["Prix_aUEC"] = st.column_config.NumberColumn(
+        "COÛT aUEC", 
+        format="%,.0f",
+        # Configuration CSS : La 8ème colonne (Prix_aUEC) sera turquoise par défaut (voir section 4. CSS)
+    )
 
     st.markdown("## 💸 HANGAR INGAME (Acquisition aUEC)")
 
     if not df_ingame.empty:
-        # Les prix sont déjà numériques grâce à la correction ci-dessus
         total_aUEC = df_ingame["Prix_aUEC"].sum()
         col_aUEC, col_toggle_aUEC = st.columns([3, 1])
         show_aUEC = col_toggle_aUEC.toggle(
@@ -950,14 +988,15 @@ def my_hangar_page():
 
         edited_ingame_display = st.data_editor(
             df_ingame_display,
-            column_config=editable_columns,
+            column_config=editable_columns_ingame,
             disabled=[
                 "Vaisseau",
                 "Marque",
                 "Rôle",
                 "Visuel",
                 "Source",
-                "Prix_aUEC",
+                "Prix_aUEC", # Désactiver la modification de la valeur aUEC
+                # Désactiver la colonne Prix_USD pour Ingame (colonne 7)
                 "Prix_USD",
             ],
             hide_index=True,
@@ -1015,14 +1054,34 @@ def corpo_fleet_page():
     total_value_usd = df_global[df_global["Source"] == "STORE"]["Prix_USD"].sum()
     total_value_aUEC = df_global[df_global["Source"] == "INGAME"]["Prix_aUEC"].sum()
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("PILOTES", total_pilots)
-    c2.metric("FLOTTE TOTALE", total_ships)
-    c3.metric("OPÉRATIONNELS", total_dispo)
-    c4.metric("VALEUR STORE", f"${total_value_usd:,.0f}")
-    c5.metric("COÛT INGAME", f"{total_value_aUEC:,.0f} aUEC")
+    st.markdown("---")
+    
+    # NOUVEL AFFICHAGE DES KPI AVEC TOGGLE
+    col_kpi, col_toggle = st.columns([4, 1])
+    
+    with col_toggle:
+        # Toggle pour afficher/cacher les valeurs
+        show_value_kpi = st.toggle(
+            "Afficher Valorisation Totale", 
+            value=False, 
+            key="toggle_corpo_kpi"
+        )
+
+    with col_kpi:
+        c1, c2, c3, c4, c5 = st.columns(5)
+        
+        # Affichage conditionnel des valeurs monétaires
+        value_usd_display = f"${total_value_usd:,.0f}" if show_value_kpi else "---"
+        value_aUEC_display = f"{total_value_aUEC:,.0f} aUEC" if show_value_kpi else "---"
+        
+        c1.metric("PILOTES", total_pilots)
+        c2.metric("FLOTTE TOTALE", total_ships)
+        c3.metric("OPÉRATIONNELS", total_dispo)
+        c4.metric("VALEUR STORE", value_usd_display)
+        c5.metric("COÛT INGAME", value_aUEC_display)
 
     st.markdown("---")
+
 
     # === ANALYSES GRAPHIQUES (version plus clean) ===
     st.markdown("### 📊 ANALYSE DE COMPOSITION")
@@ -1157,8 +1216,6 @@ def corpo_fleet_page():
     )
 
     # VUE TACTIQUE (Logique corrigée et SÉCURISÉE)
-    # On utilise .get() avec des valeurs par défaut pour éviter tout KeyError/TypeError
-    # si la structure de sélection est incomplète ou si aucune ligne n'est cliquée.
     try:
         selection_data = selection.get("selection", {})
         selected_indices = selection_data.get("rows", [])
@@ -1186,7 +1243,6 @@ def corpo_fleet_page():
                 st.warning("Visuel non disponible localement.")
 
         # Prix propres : on masque les 0 / valeurs vides
-        # Ces valeurs sont garanties être des floats grâce à la correction faite plus haut
         prix_usd = selected_row.get("Prix_USD", 0.0)
         prix_aUEC = selected_row.get("Prix_aUEC", 0.0)
 
