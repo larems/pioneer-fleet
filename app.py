@@ -6,15 +6,15 @@ import os
 import json
 import requests
 import time
-from ships_data import SHIPS_DB
+from ships_data import SHIPS_DB # Assurez-vous que ships_data.py existe et est un dictionnaire
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="PIONEER COMMAND | OPS CONSOLE", layout="wide", page_icon="💠")
 BACKGROUND_IMAGE = "assets/fondecransite.png"
 
 # --- 2. GESTION DATABASE (JSONBIN.IO) ---
-# Configuration pour la production: lecture des clés depuis l'environnement sécurisé (st.secrets)
-# N'oubliez pas de configurer la JSONBIN_KEY dans vos secrets de déploiement !
+# Activation pour la production: lecture des clés depuis l'environnement sécurisé (st.secrets)
+# JSONBIN_ID a une valeur par défaut pour la connexion au bin, JSONBIN_KEY est la clé secrète.
 JSONBIN_ID = st.secrets.get("JSONBIN_ID", "6921f0ded0ea881f40f9433f")
 JSONBIN_KEY = st.secrets.get("JSONBIN_KEY", "")
 
@@ -871,13 +871,21 @@ def corpo_fleet_page():
 
     df_global = pd.DataFrame(st.session_state.db["fleet"])
 
+    # Vérification robuste pour éviter KeyError (comme 'Source') si le DataFrame est incomplet
+    if "Source" not in df_global.columns:
+        # Ceci ne devrait se produire qu'avec une base de données mal formée. 
+        st.error("Erreur de données: Le DataFrame de flotte ne contient pas la colonne 'Source'.")
+        return
+
     total_ships = len(df_global)
     total_dispo = df_global["Dispo"].sum() 
     total_pilots = len(st.session_state.db["users"])
+
+    # Calcul sécurisé des totaux, sachant que "Source", "Prix_USD" et "Prix_aUEC" existent
     total_value_usd = df_global[df_global["Source"] == "STORE"]["Prix_USD"].sum()
     total_value_auec = df_global[df_global["Source"] == "INGAME"]["Prix_aUEC"].sum()
 
-    # Correction de l'erreur de colonnes (IndexError: tuple index out of range)
+    # Correction de l'erreur d'indexation précédente
     col1, col2, col3, col4, col5 = st.columns((1, 1, 1, 1, 1))
 
     col1.metric("PILOTES", total_pilots)
@@ -959,12 +967,15 @@ def corpo_fleet_page():
     display_df["Statut"] = display_df["Dispo"].apply(
         lambda x: "✅ DISPONIBLE" if x else "⛔ NON ASSIGNÉ"
     )
+    # Affichage du prix corrigé et sécurisé
     display_df["Prix_Acquisition"] = display_df.apply(
-        lambda row: f"${row['Prix_USD']:,.0f} USD"
-        if row["Source"] == "STORE"
-        else f"{row['Prix_aUEC']:,.0f} aUEC",
+        lambda row: f"{row['Prix_aUEC']:,.0f} aUEC" # Affiche aUEC pour les achats in-game
+        if row["Source"] == "INGAME"
+        else f"${row['Prix_USD']:,.0f} USD", # Affiche USD pour les achats Store
         axis=1,
     )
+    # Correction: La logique de la fonction 'apply' était légèrement ambiguë.
+    # Nous nous assurons d'afficher aUEC lorsque Source est INGAME, et USD dans les autres cas (STORE).
 
     selection = st.dataframe(
         display_df,
