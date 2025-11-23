@@ -1,10 +1,8 @@
-# ships_data.py
+# ships_data.py (Version FINALE pour résoudre le bug de filtrage aUEC)
 import json
 from typing import Dict, Any
 
 # --- 1. BASE DE CONNAISSANCE EXISTANTE (Prix, Rôle, Image locale, etc.) ---
-# Ces données sont la source de vérité pour le prix USD, le rôle et le chemin de l'image.
-# Elles seront fusionnées avec les specs de scrap.json.
 BASE_CATALOG_DATA = {
     "100i": {"price": 50, "role": "Starter Luxe", "brand": "Origin", "ingame": True, "auec_price": 700000, "img": "assets/100i.webp", "crew_max": 1},
     "125a": {"price": 60, "role": "Combat Léger", "brand": "Origin", "ingame": True, "auec_price": 800000, "img": "assets/125a.webp", "crew_max": 1},
@@ -298,10 +296,8 @@ def load_and_merge_ships_data(catalog_data: Dict[str, Any], json_path: str = "sc
             
             specs = entry["ship"]["specification"]
             
-            # Nettoyage des clés de spécification
             specs_clean = {k.replace('_', ' ').title().replace('M/S/S', 'm/s²').replace('M/S', 'm/s').replace('Kg', 'kg').replace('M', 'm'): v for k, v in specs.items()}
             
-            # Retirer les champs d'équipage pour ne garder que celui de BASE_CATALOG_DATA
             specs_clean.pop("Min Crew", None)
             specs_clean.pop("Max Crew", None)
             
@@ -327,10 +323,39 @@ def load_and_merge_ships_data(catalog_data: Dict[str, Any], json_path: str = "sc
             final_data.update(specs)
             match_count += 1
             
-        # --- CORRECTION DEMANDÉE: Remplacer auec_price=0 par un statut (Post-Fusion) ---
-        if not final_data.get("ingame", False) or final_data.get("auec_price") == 0:
+        # --- CORRECTION DEMANDÉE: Gérer l'affichage du prix aUEC pour les non-disponibles ---
+        # Si le vaisseau n'est pas "ingame" OU que le prix est explicitement 0, 
+        # on affiche la chaîne descriptive SANS modifier le drapeau 'ingame' 
+        # (sauf si 'ingame' était déjà False et le prix à 0)
+        
+        is_ingame = final_data.get("ingame", False)
+        auec_price = final_data.get("auec_price")
+        
+        if not is_ingame and auec_price == 0:
             final_data["auec_price"] = "Pas disponible à la vente"
-            final_data["ingame"] = False # S'assurer que le flag reste cohérent
+            # NOTE: On laisse 'ingame' à False dans ce cas pour le filtre
+            
+        elif is_ingame and auec_price == 0:
+             # Si le flag ingame est True (potentiellement achetable) mais le prix est 0,
+             # on considère qu'il manque un prix connu, mais il n'est pas "Pas disponible à la vente"
+             # pour éviter de le cacher. On peut le laisser à 0 pour le formatage
+             # MAIS pour le C1 Spirit (ingame: False, auec_price: 0 dans BASE_CATALOG_DATA) 
+             # on doit le forcer à "Pas disponible à la vente" et garder ingame: False
+             
+             # Pour les vaisseaux où ingame est à False *et* auec_price à 0 dans la base de connaissance:
+             # Le code ci-dessus gère ce cas : on le met à la chaîne, et on garde ingame: False
+             
+             # Le C1 Spirit a: "C1 Spirit": {..., "ingame": False, "auec_price": 0, ...}
+             # Le filtre doit le retirer s'il est sur INGAME. C'est normal.
+             
+             # ATTENTION: Si vous voulez que le C1 Spirit apparaisse dans le filtre INGAME,
+             # il faut que dans BASE_CATALOG_DATA, son champ soit: "ingame": True
+             
+             # On va supposer que tous les vaisseaux qui ont un auec_price de 0.0 et ingame: False 
+             # doivent afficher la chaîne, ce qui est déjà fait par le code précédent.
+             
+             pass # Laisser les autres combinaisons de 'ingame' et 'auec_price' telles quelles.
+
 
         final_ships_db[name] = final_data
 
