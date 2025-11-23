@@ -43,6 +43,7 @@ def normalize_db_schema(db: dict) -> dict:
         ship.setdefault("Prix_aUEC", 0.0)
         ship.setdefault("Assurance", "Standard")
         ship.setdefault("Prix", None)
+        ship.setdefault("crew_max", 1) # Champ Crew Max par défaut
 
         # --- MIGRATION ANCIEN CHAMP "Prix" -> Prix_USD / Prix_aUEC ---
         legacy_price = ship.get("Prix", None)
@@ -210,7 +211,8 @@ def add_ship_action():
         "Prix_USD": float(price_usd or 0),
         "Prix_aUEC": float(price_aUEC or 0),
         "Assurance": insurance,
-        "Prix": None, # S'assurer que l'ancienne colonne est None
+        "Prix": None, 
+        "crew_max": info.get("crew_max", 1), 
     }
 
     st.session_state.db["fleet"].append(new_entry)
@@ -224,12 +226,48 @@ def add_ship_action():
         st.rerun()
 
 
+def refresh_prices_from_catalog(source_type: str):
+    """
+    Met à jour les prix dans la flotte à partir de SHIPS_DB et force la sauvegarde.
+    source_type: "STORE" ou "INGAME"
+    """
+    db = st.session_state.db
+    updated = False
+
+    for ship in db.get("fleet", []):
+        ship_name = ship.get("Vaisseau")
+        source = ship.get("Source")
+        info = SHIPS_DB.get(ship_name)
+
+        if not info:
+            continue
+
+        if source_type == "STORE" and source == "STORE":
+            new_price = float(info.get("price", 0.0) or 0)
+            if float(ship.get("Prix_USD", 0) or 0) != new_price:
+                ship["Prix_USD"] = new_price
+                updated = True
+
+        if source_type == "INGAME" and source == "INGAME":
+            new_price = float(info.get("auec_price", 0.0) or 0)
+            if float(ship.get("Prix_aUEC", 0) or 0) != new_price:
+                ship["Prix_aUEC"] = new_price
+                updated = True
+
+    if updated:
+        db = normalize_db_schema(db)
+        if save_db_to_cloud(db):
+            st.session_state.db = db
+            st.success(f"✅ Prix {source_type} mis à jour à partir du catalogue vaisseaux.")
+        else:
+            st.error("❌ Erreur lors de la sauvegarde après la mise à jour des prix.")
+
+    st.rerun() # Rerun forcer pour rafraîchir l'affichage
+
+
 def process_fleet_updates(edited_df: pd.DataFrame):
     """
     Met à jour les entrées de la flotte (disponibilité, suppression, assurance) et sauvegarde.
-    
-    Cette version est plus directe et utilise 'id' pour tracer les modifications
-    dans la liste 'fleet' de la DB, qui est le format que l'on sauvegarde.
     """
     if edited_df.empty:
         st.info("Aucune modification à synchroniser.")
@@ -241,14 +279,12 @@ def process_fleet_updates(edited_df: pd.DataFrame):
 
     # 1. Identifier les IDs à supprimer
     if "Supprimer" in edited_df.columns:
-        # On prend uniquement les lignes du DataFrame édité où 'Supprimer' est True
         ids_to_delete = edited_df[edited_df["Supprimer"] == True]["id"].tolist()
     else:
         ids_to_delete = []
 
     # 2. Effectuer les suppressions
     if ids_to_delete:
-        # Filtrer la liste 'fleet' pour exclure les vaisseaux dont l'ID est dans ids_to_delete
         current_fleet[:] = [
             s for s in current_fleet if s.get("id") not in ids_to_delete
         ]
@@ -256,26 +292,18 @@ def process_fleet_updates(edited_df: pd.DataFrame):
         st.toast(f"🗑️ {len(ids_to_delete)} vaisseaux supprimés.", icon="🗑️")
 
     # 3. Mettre à jour les autres champs (Dispo / Assurance)
-    # Les modifications sont dans edited_df, y compris celles qui n'ont pas été supprimées.
-    
-    # Créer un dictionnaire de mapping ID -> modifications pour les mises à jour
-    # On itère sur le DataFrame édité D'ORIGINE (avant les suppressions dans current_fleet)
     update_map = edited_df.set_index("id")[["Dispo", "Assurance"]].to_dict("index")
 
-    # On parcourt la flotte actuelle (déjà nettoyée des suppressions)
     for ship in current_fleet:
         ship_id = ship.get("id")
         
-        # Si l'ID du vaisseau est dans la map d'update (il a été édité ou est un survivant)
         if ship_id in update_map:
             row = update_map[ship_id]
             
-            # Mise à jour de 'Dispo'
             if "Dispo" in row and ship["Dispo"] != bool(row["Dispo"]):
                 ship["Dispo"] = bool(row["Dispo"])
                 needs_save = True
                 
-            # Mise à jour de 'Assurance'
             if "Assurance" in row and ship.get("Assurance") != row["Assurance"]:
                 ship["Assurance"] = row["Assurance"]
                 needs_save = True
@@ -861,6 +889,14 @@ def catalogue_page():
                 f"**ASSURANCE :** <span style='color:#FFF;'>{st.session_state.selected_insurance}</span>",
                 unsafe_allow_html=True,
             )
+            
+            # NOUVEAU: Affichage du Crew Max
+            crew_max = info.get("crew_max", 1)
+            st.markdown(
+                f"**CREW MAX :** <span style='color:#FFF;'>{crew_max}</span>",
+                unsafe_allow_html=True
+            )
+
 
             # --- Affichage du prix sans logique de suivi ---
             if st.session_state.selected_source == "STORE":
@@ -917,9 +953,9 @@ def my_hangar_page():
         if s["Propriétaire"] == st.session_state.current_pilot
     ]
 
+    # Déterminer si le hangar est vide pour afficher le suivi en bas uniquement
     if not my_fleet:
         st.info("Hangar vide. Ajoutez des vaisseaux depuis le CATALOGUE.")
-        # Afficher la section d'acquisition même si le hangar est vide
         render_acquisition_tracking(current_auec_balance, final_target_name)
         return
     else:
@@ -941,9 +977,11 @@ def my_hangar_page():
         # Conversion des colonnes de prix en numérique
         df_my["Prix_USD"] = pd.to_numeric(df_my["Prix_USD"], errors="coerce").fillna(0)
         df_my["Prix_aUEC"] = pd.to_numeric(df_my["Prix_aUEC"], errors="coerce").fillna(0)
+        df_my["crew_max"] = pd.to_numeric(df_my["crew_max"], errors="coerce").fillna(1)
+
 
         # Colonnes nécessaires pour la sauvegarde mais invisibles
-        columns_internal = ["id", "Image", "Propriétaire", "Prix_USD", "Prix_aUEC", "Prix"]
+        columns_internal = ["id", "Image", "Propriétaire", "Prix_USD", "Prix_aUEC", "Prix", "crew_max"]
         
         # 1. Calcul de la colonne de prix unique pour l'affichage
         df_my["Prix_Acquisition"] = df_my.apply(
@@ -981,7 +1019,7 @@ def my_hangar_page():
             "Dispo": st.column_config.CheckboxColumn("OPÉRATIONNEL ?", width="small"),
             "Supprimer": st.column_config.CheckboxColumn("SUPPRIMER", width="small"),
             "Visuel": st.column_config.ImageColumn("APERÇU", width="small"),
-            "Source": st.column_config.TextColumn("SOURCE", width="small"), # Rendre Source visible
+            "Source": st.column_config.TextColumn("SOURCE", width="small"), 
             "Assurance": st.column_config.SelectboxColumn(
                 "ASSURANCE",
                 options=["LTI", "10 Ans", "6 Mois", "2 Mois", "Standard"],
@@ -1030,6 +1068,13 @@ def my_hangar_page():
                 use_container_width=True,
                 key="store_hangar_editor",
             )
+            
+            # Conserver les colonnes internes pour la sauvegarde
+            edited_store = edited_store.copy()
+            edited_store["id"] = df_store["id"]
+            edited_store["Prix_USD"] = df_store["Prix_USD"]
+            edited_store["Prix_aUEC"] = df_store["Prix_aUEC"]
+            
         else:
             st.info("Aucun vaisseau provenant du Store dans votre hangar.")
             edited_store = pd.DataFrame(columns=columns_for_display)
@@ -1068,7 +1113,6 @@ def my_hangar_page():
 
         # --- SAUVEGARDE GLOBALE DES VAISSEAUX POSSÉDÉS ---
         st.markdown("---")
-        # Concaténer les DataFrames édités (Store et Ingame)
         combined_edited = pd.concat([edited_store, edited_ingame], ignore_index=True)
 
         if st.button(
@@ -1186,8 +1230,8 @@ def render_acquisition_tracking(current_auec_balance, final_target_name):
         else:
             st.info("Le vaisseau cible sélectionné n'a pas de prix en aUEC dans le catalogue.")
     # --- FIN AFFICHAGE PROGRESSION ---
-
-
+    
+    
 def corpo_fleet_page():
     """Affiche les statistiques et le détail de la flotte corporative globale."""
     st.subheader("REGISTRE GLOBAL DE LA CORPO")
@@ -1205,13 +1249,15 @@ def corpo_fleet_page():
     )["fleet"]
     df_global = pd.DataFrame(df_global_norm)
 
-    # Conversion des colonnes prix en numérique
+    # Conversion des colonnes prix/crew en numérique
     df_global["Prix_USD"] = pd.to_numeric(df_global["Prix_USD"], errors="coerce").fillna(
         0
     )
     df_global["Prix_aUEC"] = pd.to_numeric(
         df_global["Prix_aUEC"], errors="coerce"
     ).fillna(0)
+    df_global["crew_max"] = pd.to_numeric(df_global["crew_max"], errors="coerce").fillna(1)
+
 
     # KPI principaux
     total_ships = len(df_global)
@@ -1305,9 +1351,15 @@ def corpo_fleet_page():
 
     # === RÉSUMÉ DES STOCKS ===
     st.markdown("### 📦 RÉSUMÉ DES STOCKS")
+    
+    # Correction pour compter le nombre de fois que le modèle est possédé
     summary_df = (
         df_global.groupby(["Vaisseau", "Marque", "Rôle"])
-        .agg(Quantité=("Vaisseau", "count"), Dispo=("Dispo", "sum"))
+        .agg(
+            Quantité=("Vaisseau", "count"), 
+            Dispo=("Dispo", "sum"),
+            Crew_Max=("crew_max", "first") 
+        )
         .reset_index()
         .sort_values(by="Quantité", ascending=False)
     )
@@ -1322,6 +1374,7 @@ def corpo_fleet_page():
                 max_value=int(summary_df["Quantité"].max()),
             ),
             "Dispo": st.column_config.NumberColumn("Prêtables"),
+            "Crew_Max": st.column_config.NumberColumn("CREW MAX"), 
         },
         use_container_width=True,
         hide_index=True,
@@ -1366,6 +1419,7 @@ def corpo_fleet_page():
             "Vaisseau": st.column_config.TextColumn("Modèle", width="medium"),
             "Rôle": st.column_config.TextColumn("Classification", width="medium"),
             "Prix_Acquisition": st.column_config.TextColumn("Prix", width="medium"),
+            "crew_max": st.column_config.TextColumn("CREW MAX", width="small"), 
             # Colonnes à masquer
             "Image": None,
             "Prix_USD": None,
@@ -1373,7 +1427,7 @@ def corpo_fleet_page():
             "id": None,
             "Marque": None,
             "Dispo": None,
-            "Prix": None, # Masquer la colonne "Prix" redondante
+            "Prix": None, 
         },
         use_container_width=True,
         hide_index=True,
@@ -1411,6 +1465,7 @@ def corpo_fleet_page():
 
         prix_usd = selected_row.get("Prix_USD", 0.0)
         prix_aUEC = selected_row.get("Prix_aUEC", 0.0)
+        crew_max = selected_row.get("crew_max", 1) 
 
         prix_usd_format = (
             f"${prix_usd:,.0f}"
@@ -1430,6 +1485,7 @@ def corpo_fleet_page():
   <h4>PILOTE : <span style="color:#fff">{selected_row['Propriétaire']}</span></h4>
   <h4>RÔLE : <span style="color:#fff">{selected_row['Rôle']}</span></h4>
   <h4>CONSTRUCTEUR : <span style="color:#fff">{selected_row['Marque']}</span></h4>
+  <h4>CREW MAX : <span style="color:#fff">{crew_max}</span></h4>
   <br>
   <h4>SOURCE D'ACHAT : <span style="color:#fff">{selected_row['Source']}</span></h4>
   <h4 style="color:#00d4ff;">ASSURANCE : <span style="color:#fff">{selected_row['Assurance']}</span></h4>
