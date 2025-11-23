@@ -27,7 +27,7 @@ def normalize_db_schema(db: dict) -> dict:
     """
     db.setdefault("users", {})
     db.setdefault("fleet", [])
-    # NOUVEAU: Ajout d'une section pour les données spécifiques à l'utilisateur (comme le solde aUEC)
+    # NOUVEAU: Ajout d'une section pour les données spécifiques à l'utilisateur
     db.setdefault("user_data", {}) 
 
     for i, ship in enumerate(db["fleet"]):
@@ -43,6 +43,7 @@ def normalize_db_schema(db: dict) -> dict:
         ship.setdefault("Prix_USD", 0.0)
         ship.setdefault("Prix_aUEC", 0.0)
         ship.setdefault("Assurance", "Standard")
+        ship.setdefault("Prix", None) # S'assurer que l'ancienne colonne est None
 
         # --- MIGRATION ANCIEN CHAMP "Prix" -> Prix_USD / Prix_aUEC ---
         legacy_price = ship.get("Prix", None)
@@ -64,10 +65,11 @@ def normalize_db_schema(db: dict) -> dict:
                 ship["Prix_USD"] = legacy_price_clean
             if ship.get("Source") == "INGAME" and float(ship.get("Prix_aUEC", 0) or 0) == 0:
                 ship["Prix_aUEC"] = legacy_price_clean
-        
-        # S'assurer que le champ 'Prix' (l'ancien champ) est présent si ce n'est pas le cas pour ne pas planter
-        ship.setdefault("Prix", None)
-
+    
+    # Normalisation du user_data
+    for pilot in db.get("users", {}).keys():
+        db["user_data"].setdefault(pilot, {"auec_balance": 0, "acquisition_target": None})
+    
     return db
 
 
@@ -320,7 +322,7 @@ bg_img_code = get_local_img_as_base64(BACKGROUND_IMAGE)
 st.markdown(
     f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@500&display=swap');
 
 /* FOND GLOBAL */
 .stApp {{
@@ -848,25 +850,12 @@ def catalogue_page():
             pilot_data = st.session_state.db.get("user_data", {}).get(st.session_state.current_pilot, {})
             current_auec_balance = pilot_data.get("auec_balance", 0)
             
-            # --- CHAMP D'ENTRÉE DU SOLDE AUEC ---
-            new_auec_balance = st.number_input(
-                "💰 **MON SOLDE aUEC ACTUEL**",
-                min_value=0,
-                value=int(current_auec_balance),
-                step=1000,
-                help="Entrez votre solde actuel pour suivre votre progression d'achat en jeu."
+            # --- Le champ de solde aUEC est déplacé vers my_hangar_page ---
+            st.markdown(
+                f"<h4 style='color:#30e8ff;'>Solde aUEC : {current_auec_balance:,.0f}</h4>",
+                unsafe_allow_html=True
             )
-            
-            # Action de mise à jour du solde
-            if new_auec_balance != current_auec_balance:
-                st.session_state.db["user_data"].setdefault(st.session_state.current_pilot, {})
-                st.session_state.db["user_data"][st.session_state.current_pilot]["auec_balance"] = new_auec_balance
-                if save_db_to_cloud(st.session_state.db):
-                    st.toast("✅ Solde aUEC mis à jour et sauvegardé.", icon="💰")
-                    st.rerun()
-
             st.markdown("---")
-
 
         if selected_name and selected_name in SHIPS_DB:
             info = SHIPS_DB[selected_name]
@@ -895,36 +884,7 @@ def catalogue_page():
                 unsafe_allow_html=True,
             )
 
-            # --- NOUVEAU : SUIVI DE L'OBJECTIF AUEC ---
-            if st.session_state.current_pilot and st.session_state.selected_source == "INGAME":
-                cost_auec = float(info.get('auec_price', 0) or 0)
-                
-                if cost_auec > 0 and current_auec_balance >= 0: # on garde la vérif >= 0 pour afficher l'objectif
-                    st.markdown("#### OBJECTIF D'ACQUISITION (aUEC)")
-                    
-                    progress_ratio = min(1.0, current_auec_balance / cost_auec)
-                    progress_percent = int(progress_ratio * 100)
-                    
-                    st.metric(
-                        "COÛT CIBLE", 
-                        f"{cost_auec:,.0f} aUEC", 
-                        delta=f"Progression : {progress_percent}%", 
-                        delta_color="normal" if progress_percent < 100 else "inverse"
-                    )
-
-                    st.progress(progress_ratio, text=f"**{current_auec_balance:,.0f} aUEC / {cost_auec:,.0f} aUEC**")
-                    
-                    if progress_percent >= 100:
-                        st.success("Fonds suffisants pour l'acquisition ! 🚀")
-                    else:
-                        remaining = cost_auec - current_auec_balance
-                        st.info(f"Il vous manque **{remaining:,.0f} aUEC** pour atteindre l'objectif.")
-                elif cost_auec > 0:
-                    st.info(f"Entrez votre solde aUEC pour suivre l'objectif de {cost_auec:,.0f} aUEC.")
-                
-                st.markdown("---") # Séparateur après la section d'objectif
-            # --- FIN SUIVI OBJECTIF ---
-
+            # --- Affichage du prix sans logique de suivi ---
             if st.session_state.selected_source == "STORE":
                 price_value = f"${info.get('price', 0):,.0f} USD (Valeur)"
                 price_style = "color:#00d4ff;"
@@ -973,6 +933,101 @@ def my_hangar_page():
         if s["Propriétaire"] == st.session_state.current_pilot
     ]
 
+    # Récupérer les données utilisateur (y compris le solde aUEC)
+    pilot_data = st.session_state.db.get("user_data", {}).get(st.session_state.current_pilot, {})
+    current_auec_balance = pilot_data.get("auec_balance", 0)
+    target_ship_name = pilot_data.get("acquisition_target", None)
+    
+    # Liste de tous les vaisseaux achetable en aUEC pour le sélecteur cible
+    ingame_ships = sorted([name for name, data in SHIPS_DB.items() if data.get('ingame', False)])
+    ingame_options = ["— Aucun objectif —"] + ingame_ships
+    
+    if target_ship_name in ingame_options:
+        default_index = ingame_options.index(target_ship_name)
+    else:
+        default_index = 0
+
+    
+    # --- FORMULAIRE ET SÉLECTEUR D'ACQUISITION FUTURE ---
+    st.markdown("### 🎯 SUIVI D'ACQUISITION FUTURE (aUEC)")
+    col_input, col_selector = st.columns([1, 2])
+    
+    with col_input:
+        new_auec_balance = st.number_input(
+            "💰 **MON SOLDE aUEC ACTUEL**",
+            min_value=0,
+            value=int(current_auec_balance),
+            step=1000,
+            key="hangar_auec_input",
+            help="Entrez votre solde actuel pour suivre votre progression d'achat."
+        )
+
+    with col_selector:
+        selected_target = st.selectbox(
+            "🚀 **VAISSEAU CIBLE EN JEU**",
+            ingame_options,
+            index=default_index,
+            key="hangar_target_select",
+        )
+        
+    
+    # Logique de mise à jour du solde/cible
+    if st.session_state.hangar_auec_input != current_auec_balance or st.session_state.hangar_target_select != target_ship_name:
+        
+        new_target = selected_target if selected_target != "— Aucun objectif —" else None
+        
+        st.session_state.db["user_data"].setdefault(st.session_state.current_pilot, {})
+        user_data_update = st.session_state.db["user_data"][st.session_state.current_pilot]
+        
+        user_data_update["auec_balance"] = new_auec_balance
+        user_data_update["acquisition_target"] = new_target
+        
+        if save_db_to_cloud(st.session_state.db):
+            st.toast("✅ Solde / Objectif mis à jour et sauvegardé.", icon="💰")
+            st.rerun()
+            
+    # --- AFFICHAGE DE LA PROGRESSION (après mise à jour) ---
+    final_target_name = st.session_state.db["user_data"][st.session_state.current_pilot].get("acquisition_target")
+    final_auec_balance = st.session_state.db["user_data"][st.session_state.current_pilot].get("auec_balance", 0)
+    
+    if final_target_name and final_target_name in SHIPS_DB:
+        target_info = SHIPS_DB[final_target_name]
+        cost_auec = float(target_info.get('auec_price', 0) or 0)
+        
+        if cost_auec > 0:
+            st.markdown("#### PROCHAIN OBJECTIF : **" + final_target_name + "**")
+            
+            progress_ratio = min(1.0, final_auec_balance / cost_auec)
+            progress_percent = int(progress_ratio * 100)
+            
+            col_metric_1, col_metric_2 = st.columns(2)
+            
+            col_metric_1.metric(
+                "COÛT CIBLE", 
+                f"{cost_auec:,.0f} aUEC", 
+            )
+            col_metric_2.metric(
+                "PROGRESSION", 
+                f"{final_auec_balance:,.0f} aUEC", 
+                delta=f"{progress_percent}%", 
+                delta_color="normal" if progress_percent < 100 else "inverse"
+            )
+
+            st.progress(progress_ratio, text=f"**{final_auec_balance:,.0f} aUEC / {cost_auec:,.0f} aUEC**")
+            
+            if progress_percent >= 100:
+                st.success("Fonds suffisants ! Vous pouvez acheter votre vaisseau. 🚀")
+            else:
+                remaining = cost_auec - final_auec_balance
+                st.warning(f"Il vous manque **{remaining:,.0f} aUEC** pour l'acquisition.")
+        else:
+            st.info("Le vaisseau cible sélectionné n'a pas de prix en aUEC dans le catalogue.")
+
+    st.markdown("---")
+    # --- FIN SUIVI ACQUISITION FUTURE ---
+    
+    
+    # --- LISTE DES VAISSEAUX POSSÉDÉS ---
     if not my_fleet:
         st.info("Hangar vide. Ajoutez des vaisseaux depuis le CATALOGUE.")
         return
@@ -983,7 +1038,6 @@ def my_hangar_page():
     if "Source" not in df_my.columns:
         st.error(
             "Données de flotte incomplètes (colonne 'Source' manquante). "
-            "Ajoutez un nouveau vaisseau depuis le catalogue pour régénérer la structure."
         )
         return
 
@@ -1023,24 +1077,6 @@ def my_hangar_page():
         "Supprimer"
     ]
     
-    # --- BOUTONS D'ACTUALISATION FORCÉE DES PRIX ---
-    col_refresh_left, col_refresh_right = st.columns([1, 1])
-
-    if col_refresh_left.button("♻️ Actualiser Prix USD / DB", use_container_width=True):
-        load_db_from_cloud.clear()
-        refresh_prices_from_catalog("STORE") # La fonction appelle st.rerun()
-
-    if col_refresh_right.button(
-        "♻️ Actualiser Prix aUEC / DB", use_container_width=True
-    ):
-        load_db_from_cloud.clear()
-        refresh_prices_from_catalog("INGAME") # La fonction appelle st.rerun()
-
-    st.caption(
-        "❗ Utilisez **ACTUALISER** pour synchroniser les changements (Disponibilité / Suppression / Assurance) avec la base de données centrale."
-    )
-    st.markdown("---")  # Séparateur
-
     # Configuration des colonnes affichées pour n'inclure que la colonne unique de prix
     editable_columns_base = {
         "Dispo": st.column_config.CheckboxColumn("OPÉRATIONNEL ?", width="small"),
@@ -1340,7 +1376,7 @@ def corpo_fleet_page():
             "Vaisseau": st.column_config.TextColumn("Modèle", width="medium"),
             "Rôle": st.column_config.TextColumn("Classification", width="medium"),
             "Prix_Acquisition": st.column_config.TextColumn("Prix", width="medium"),
-            # Colonnes à masquer, incluant l'ancienne colonne "Prix"
+            # Colonnes à masquer
             "Image": None,
             "Prix_USD": None,
             "Prix_aUEC": None,
