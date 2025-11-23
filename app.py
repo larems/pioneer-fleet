@@ -341,7 +341,7 @@ def process_fleet_updates(edited_df: pd.DataFrame):
         )
 
 
-# --- 4. CSS (Styles optimisés) (CORRIGÉ ET SIMPLIFIÉ) ---
+# --- 4. CSS (Styles optimisés) ---
 bg_img_code = get_local_img_as_base64(BACKGROUND_IMAGE)
 
 st.markdown(
@@ -429,7 +429,7 @@ p, div, span, label, .stMarkdown, .stText {{
 
 /* Style appliqué au label personnalisé (la classe 'custom-ship-label' est injectée dans le HTML) */
 .custom-ship-label {{
-    background: rgba(4, 20, 35, 0.9);
+    /* Style par défaut pour la zone cliquable */
     padding: 8px 12px;
     border-radius: 6px;
     border: 1px solid #00d4ff;
@@ -437,9 +437,6 @@ p, div, span, label, .stMarkdown, .stText {{
     cursor: pointer;
     display: inline-block;
     transition: all 0.2s;
-}}
-.custom-ship-label:hover {{
-    background: #00d4ff; /* Le hover sera géré ici ou par le script, mais la base est là */
 }}
 
 /* IMPORTANT: Masquer la case à cocher native de Streamlit pour n'afficher que le label stylisé */
@@ -770,8 +767,14 @@ def catalogue_page():
                         # 2. Styles dynamiques pour le label HTML
                         selected_class = "selected-card" if is_selected else ""
                         label_text = f"✅ SÉLECTIONNÉ" if is_selected else "☐ SÉLECTIONNER"
-                        label_color = '#041623' if is_selected else '#ffffff'
-                        label_background = '#00d4ff' if is_selected else 'rgba(4, 20, 35, 0.9)'
+                        
+                        # Couleurs en fonction de l'état (pour le style en ligne)
+                        if is_selected:
+                            label_color = '#041623'
+                            label_background = '#00d4ff'
+                        else:
+                            label_color = '#ffffff'
+                            label_background = 'rgba(4, 20, 35, 0.9)'
 
 
                         st.markdown(f"""
@@ -783,7 +786,7 @@ def catalogue_page():
             background: {label_background};
             color: {label_color};
         ">
-            <span style="font-family: 'Orbitron', sans-serif; font-weight: 700; color: {label_color}; text-transform: uppercase;">
+            <span style="font-family: 'Orbitron', sans-serif; font-weight: 700;">
                 {label_text}
             </span>
         </label>
