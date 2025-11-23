@@ -6,7 +6,7 @@ import os
 import json
 import requests
 import time
-from ships_data import SHIPS_DB # Assurez-vous que ships_data.py existe et est un dictionnaire
+from ships_data import SHIPS_DB
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="PIONEER COMMAND | OPS CONSOLE", layout="wide", page_icon="💠")
@@ -14,7 +14,6 @@ BACKGROUND_IMAGE = "assets/fondecransite.png"
 
 # --- 2. GESTION DATABASE (JSONBIN.IO) ---
 # Configuration pour la production: lecture des clés depuis l'environnement sécurisé (st.secrets)
-# N'oubliez pas de configurer la JSONBIN_KEY dans vos secrets de déploiement !
 JSONBIN_ID = st.secrets.get("JSONBIN_ID", "6921f0ded0ea881f40f9433f")
 JSONBIN_KEY = st.secrets.get("JSONBIN_KEY", "")
 
@@ -871,12 +870,16 @@ def corpo_fleet_page():
 
     df_global = pd.DataFrame(st.session_state.db["fleet"])
 
-    # Vérification robuste pour éviter KeyError (comme 'Source' ou 'Prix_USD')
-    required_cols = ["Source", "Prix_USD", "Prix_aUEC", "Dispo"]
+    # Vérification robuste des colonnes pour éviter KeyError:
+    required_cols = ["Source", "Prix_USD", "Prix_aUEC", "Dispo", "Marque", "Rôle", "Vaisseau"]
     missing_cols = [col for col in required_cols if col not in df_global.columns]
     
     if missing_cols:
-        st.error(f"Erreur de données: Le DataFrame de flotte est incomplet (colonnes manquantes: {', '.join(missing_cols)}). Impossible d'afficher les statistiques.")
+        # Affichage d'un avertissement détaillé et sortie propre
+        st.error(
+            f"Erreur de données: Le DataFrame de flotte est incomplet (colonnes manquantes: {', '.join(missing_cols)}). "
+            f"Impossible d'afficher les statistiques. Veuillez ajouter un vaisseau complet pour initialiser la DB locale."
+        )
         return
 
     total_ships = len(df_global)
