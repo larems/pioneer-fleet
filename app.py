@@ -176,23 +176,10 @@ def add_ship_action():
         return
 
     info = SHIPS_DB[ship_name]
-    new_id = int(time.time() * 1_000_000)
+    # Utilisation du temps en millisecondes pour un ID unique (même si le nom est le même)
+    new_id = int(time.time() * 1_000_000) 
 
-    # Vérification anti-doublon
-    is_duplicate = any(
-        s["Propriétaire"] == owner
-        and s["Vaisseau"] == ship_name
-        and s["Source"] == source
-        and s.get("Assurance") == insurance
-        for s in st.session_state.db["fleet"]
-    )
-
-    if is_duplicate:
-        st.toast(
-            f"🛑 {ship_name} est déjà enregistré avec cette configuration d'assurance/source.",
-            icon="🛑",
-        )
-        return
+    # *** VÉRIFICATION ANTI-DOUBLON SUPPRIMÉE POUR PERMETTRE X2, X3, etc. ***
 
     img_b64 = get_local_img_as_base64(info.get("img", ""))
     price_usd = info.get("price", 0.0)
@@ -941,7 +928,7 @@ def my_hangar_page():
     st.subheader(f"HANGAR LOGISTIQUE | PILOTE: {st.session_state.current_pilot}")
     st.markdown("---")
 
-    # --- LECTURE DES VARIABLES NÉCESSAIRES EN DÉBUT DE FONCTION (CORRECTION DU NAMERROR) ---
+    # --- LECTURE DES VARIABLES NÉCESSAIRES EN DÉBUT DE FONCTION ---
     pilot_data = st.session_state.db.get("user_data", {}).get(st.session_state.current_pilot, {})
     current_auec_balance = pilot_data.get("auec_balance", 0)
     final_target_name = pilot_data.get("acquisition_target", None)
@@ -953,9 +940,9 @@ def my_hangar_page():
         if s["Propriétaire"] == st.session_state.current_pilot
     ]
 
-    # Déterminer si le hangar est vide pour afficher le suivi en bas uniquement
     if not my_fleet:
         st.info("Hangar vide. Ajoutez des vaisseaux depuis le CATALOGUE.")
+        # Afficher la section d'acquisition même si le hangar est vide
         render_acquisition_tracking(current_auec_balance, final_target_name)
         return
     else:
@@ -1454,7 +1441,7 @@ def corpo_fleet_page():
 
         with col_img:
             image_path = selected_row.get("Image")
-            if image_path and os.path.exists(image_path):
+            if os.path.exists(image_path):
                 st.image(
                     image_path,
                     use_container_width=True,
@@ -1500,25 +1487,3 @@ def corpo_fleet_page():
 """,
                 unsafe_allow_html=True,
             )
-
-
-# --- 8. APP PRINCIPALE ---
-
-render_sidebar()
-
-if not st.session_state.current_pilot:
-    # Page d'accueil sans gros titre global
-    home_page()
-else:
-    # Titre global uniquement après connexion
-    st.markdown(
-        "<h1>PIONEER COMMAND | CONSOLE D'OPÉRATIONS</h1>",
-        unsafe_allow_html=True,
-    )
-
-    if st.session_state.menu_nav == "CATALOGUE":
-        catalogue_page()
-    elif st.session_state.menu_nav == "MON HANGAR":
-        my_hangar_page()
-    elif st.session_state.menu_nav == "FLOTTE CORPO":
-        corpo_fleet_page()
