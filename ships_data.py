@@ -3,8 +3,7 @@ import json
 from typing import Dict, Any
 
 # --- 1. BASE DE CONNAISSANCE UNIFIÉE (Prix, Rôle, Image locale) ---
-# NOTE: Le statut 'ingame' est forcé à True ici pour assurer l'affichage dans l'onglet INGAME/aUEC.
-# Les prix aUEC réels sont mis à jour pour le C1 Spirit (3.2M) et A1 Spirit (3.8M).
+# Statut 'ingame' forcé à True pour l'affichage aUEC de tous les vaisseaux.
 BASE_CATALOG_DATA = {
     "100i": {"price": 50, "role": "Starter Luxe", "brand": "Origin", "ingame": True, "auec_price": 700000, "img": "assets/100i.webp", "crew_max": 1},
     "125a": {"price": 60, "role": "Combat Léger", "brand": "Origin", "ingame": True, "auec_price": 800000, "img": "assets/125a.webp", "crew_max": 1},
@@ -54,7 +53,7 @@ BASE_CATALOG_DATA = {
     "C8 Pisces": {"price": 40, "role": "Snub", "brand": "Anvil", "ingame": True, "auec_price": 350000, "img": "assets/c8 pisces.webp", "crew_max": 1},
     "C8R Pisces": {"price": 60, "role": "Médical Snub", "brand": "Anvil", "ingame": True, "auec_price": 350000, "img": "assets/c8r pisces.webp", "crew_max": 1},
     "C8X Pisces Expedition": {"price": 45, "role": "Exploration Snub", "brand": "Anvil", "ingame": True, "auec_price": 350000, "img": "assets/c8x pisces expedition.webp", "crew_max": 1},
-    "Carrack Expedition W C8X": {"price": 600, "role": "Exploration", "brand": "Anvil", "ingame": True, "auec_price": 26000000, "img": "assets/Carrack w c8x.webp", "crew_max": 5},
+    "Carrack W C8X": {"price": 600, "role": "Exploration", "brand": "Anvil", "ingame": True, "auec_price": 26000000, "img": "assets/Carrack w c8x.webp", "crew_max": 5},
     "Carrack Expedition": {"price": 600, "role": "Exploration", "brand": "Anvil", "ingame": True, "auec_price": 26000000, "img": "assets/carrack expedition.webp", "crew_max": 5},
     "Carrack": {"price": 600, "role": "Exploration", "brand": "Anvil", "ingame": True, "auec_price": 26000000, "img": "assets/carrack.webp", "crew_max": 5},
     "Carterpillar Best In Show Edition 2949": {"price": 330, "role": "Fret Lourd", "brand": "Drake", "ingame": True, "auec_price": 4650000, "img": "assets/carterpillar best in show edition 2949.webp", "crew_max": 4},
@@ -286,6 +285,7 @@ def load_and_merge_ships_data(catalog_data: Dict[str, Any], json_path: str = "sc
         print(f"⚠️ Fichier {json_path} non trouvé. Utilisation de la BASE_CATALOG_DATA seule.")
         return catalog_data
     except json.JSONDecodeError:
+        # Ceci est souvent la cause des crashs. Affiche l'erreur si le JSON est mal formé.
         print(f"❌ Erreur de décodage JSON dans {json_path}. Vérifiez la syntaxe du fichier.")
         return catalog_data
     
@@ -301,16 +301,14 @@ def load_and_merge_ships_data(catalog_data: Dict[str, Any], json_path: str = "sc
             # Nettoyage et capitalisation des clés de spécification
             specs_clean = {k.replace('_', ' ').title().replace('M/S/S', 'm/s²').replace('M/S', 'm/s').replace('Kg', 'kg').replace('M', 'm'): v for k, v in specs.items()}
             
-            # Retirer les champs d'équipage et cargo qui ne correspondent pas au format de BASE_CATALOG_DATA
+            # Retirer les champs d'équipage qui pourraient écraser crew_max
             specs_clean.pop("Min Crew", None)
             specs_clean.pop("Max Crew", None)
             
             specs_clean["Titre Original Scrap"] = raw_title
             
-            # Ajuster le format de CargoCapacity (SCU) si possible
             if 'Cargocapacity' in specs_clean and specs_clean['Cargocapacity'] not in ('-', '0', None):
                 try:
-                    # Assurez-vous que c'est un nombre entier
                     specs_clean['Cargocapacity'] = str(int(float(specs_clean['Cargocapacity'])))
                 except ValueError:
                     pass
@@ -335,14 +333,13 @@ def load_and_merge_ships_data(catalog_data: Dict[str, Any], json_path: str = "sc
             final_data.update(specs)
             match_count += 1
             
-        # --- RÈGLE D'AFFICHAGE DU PRIX aUEC : 0 devient la chaîne ---
-        # Si le prix est 0 (indiquant l'absence de prix connu), on remplace par la chaîne descriptive.
+        # --- RÈGLE D'AFFICHAGE DU PRIX aUEC : 0 devient la chaîne descriptive ---
         if final_data.get("auec_price") == 0:
             final_data["auec_price"] = "Non achetable en jeu"
 
         final_ships_db[name] = final_data
 
-    # Log pour info
+    # Log pour information
     print(f"\n--- Fusion & Nettoyage de Données ---")
     print(f"Statut 'ingame' forcé à True pour l'affichage aUEC.")
     print(f"Spécifications fusionnées : {match_count} entrées")
