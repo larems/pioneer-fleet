@@ -50,7 +50,7 @@ BASE_CATALOG_DATA = {
     "Ballista": {"price": 140, "role": "DCA", "brand": "Anvil", "ingame": True, "auec_price": 1900000, "img": "assets/ballista.webp", "crew_max": 2},
     "Blade": {"price": 275, "role": "Chasseur Léger", "brand": "Vanduul", "ingame": True, "auec_price": 0, "img": "assets/blade.webp", "crew_max": 1},
     "Buccaneer": {"price": 110, "role": "Intercepteur", "brand": "Drake", "ingame": True, "auec_price": 1450000, "img": "assets/buccaneer.webp", "crew_max": 1},
-    "C1 Spirit": {"price": 125, "role": "Fret Rapide", "brand": "Crusader", "ingame": True, "auec_price": 3200000, "img": "assets/c1 spirit.webp", "crew_max": 1}, # PRIX CORRIGÉ
+    "C1 Spirit": {"price": 125, "role": "Fret Rapide", "brand": "Crusader", "ingame": True, "auec_price": 3200000, "img": "assets/c1 spirit.webp", "crew_max": 1}, 
     "C8 Pisces": {"price": 40, "role": "Snub", "brand": "Anvil", "ingame": True, "auec_price": 350000, "img": "assets/c8 pisces.webp", "crew_max": 1},
     "C8R Pisces": {"price": 60, "role": "Médical Snub", "brand": "Anvil", "ingame": True, "auec_price": 350000, "img": "assets/c8r pisces.webp", "crew_max": 1},
     "C8X Pisces Expedition": {"price": 45, "role": "Exploration Snub", "brand": "Anvil", "ingame": True, "auec_price": 350000, "img": "assets/c8x pisces expedition.webp", "crew_max": 1},
@@ -84,7 +84,7 @@ BASE_CATALOG_DATA = {
     "Defender": {"price": 220, "role": "Chasseur Alien", "brand": "Banu", "ingame": True, "auec_price": 3600000, "img": "assets/defender.webp", "crew_max": 2},
     "Dragonfly Black": {"price": 40, "role": "Gravlev", "brand": "Drake", "ingame": True, "auec_price": 150000, "img": "assets/dragonfly black.webp", "crew_max": 2},
     "Dragonfly Yellowjacket": {"price": 40, "role": "Gravlev", "brand": "Drake", "ingame": True, "auec_price": 150000, "img": "assets/dragonfly yellowjacket.webp", "crew_max": 2},
-    "E1 Spirit": {"price": 150, "role": "Luxe / Transport", "brand": "Crusader", "ingame": True, "auec_price": 0, "img": "assets/e1 spirit.webp", "crew_max": 1}, # CORRIGÉ À TRUE, PRIX À 0
+    "E1 Spirit": {"price": 150, "role": "Luxe / Transport", "brand": "Crusader", "ingame": True, "auec_price": 0, "img": "assets/e1 spirit.webp", "crew_max": 1}, 
     "Eclipse": {"price": 300, "role": "Bombardier Furtif", "brand": "Aegis", "ingame": True, "auec_price": 6000000, "img": "assets/eclipse.webp", "crew_max": 1},
     "Endeavor": {"price": 350, "role": "Science", "brand": "MISC", "ingame": True, "auec_price": 0, "img": "assets/endeavor.webp", "crew_max": 4},
     "Expanse": {"price": 150, "role": "Raffinage", "brand": "MISC", "ingame": True, "auec_price": 0, "img": "assets/expanse.webp", "crew_max": 1},
@@ -298,7 +298,7 @@ def load_and_merge_ships_data(catalog_data: Dict[str, Any], json_path: str = "sc
             
             specs = entry["ship"]["specification"]
             
-            # Nettoyage des clés de spécification
+            # Nettoyage et capitalisation des clés de spécification
             specs_clean = {k.replace('_', ' ').title().replace('M/S/S', 'm/s²').replace('M/S', 'm/s').replace('Kg', 'kg').replace('M', 'm'): v for k, v in specs.items()}
             
             # Retirer les champs d'équipage et cargo qui ne correspondent pas au format de BASE_CATALOG_DATA
@@ -307,6 +307,14 @@ def load_and_merge_ships_data(catalog_data: Dict[str, Any], json_path: str = "sc
             
             specs_clean["Titre Original Scrap"] = raw_title
             
+            # Ajuster le format de CargoCapacity (SCU) si possible
+            if 'Cargocapacity' in specs_clean and specs_clean['Cargocapacity'] not in ('-', '0', None):
+                try:
+                    # Assurez-vous que c'est un nombre entier
+                    specs_clean['Cargocapacity'] = str(int(float(specs_clean['Cargocapacity'])))
+                except ValueError:
+                    pass
+
             scrap_db[normalized_key] = specs_clean
             
         except KeyError:
@@ -328,6 +336,7 @@ def load_and_merge_ships_data(catalog_data: Dict[str, Any], json_path: str = "sc
             match_count += 1
             
         # --- RÈGLE D'AFFICHAGE DU PRIX aUEC : 0 devient la chaîne ---
+        # Si le prix est 0 (indiquant l'absence de prix connu), on remplace par la chaîne descriptive.
         if final_data.get("auec_price") == 0:
             final_data["auec_price"] = "Non achetable en jeu"
 
@@ -335,10 +344,9 @@ def load_and_merge_ships_data(catalog_data: Dict[str, Any], json_path: str = "sc
 
     # Log pour info
     print(f"\n--- Fusion & Nettoyage de Données ---")
-    print(f"Catalogue initial : {len(catalog_data)} vaisseaux")
-    print(f"Statut 'ingame' forcé à True pour tous les affichages aUEC.")
+    print(f"Statut 'ingame' forcé à True pour l'affichage aUEC.")
     print(f"Spécifications fusionnées : {match_count} entrées")
-    print(f"Catalogue final (SHIPS_DB) : {len(final_ships_db)} vaisseaux.")
+    print(f"Prix aUEC à 0 remplacés par 'Non achetable en jeu'.")
     print("---")
     
     return final_ships_db

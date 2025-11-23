@@ -41,7 +41,7 @@ def normalize_db_schema(db: dict) -> dict:
         ship.setdefault("Source", "STORE")
         ship.setdefault("Prix_USD", 0.0)
         
-        # Le prix aUEC peut être un nombre ou une chaîne ("Non achetable en jeu")
+        # Le prix aUEC peut être un nombre ou une chaîne
         default_auec = 0 
         if ship.get("Prix_aUEC") == "Non achetable en jeu":
             default_auec = "Non achetable en jeu"
@@ -184,8 +184,6 @@ def add_ship_action():
     info = SHIPS_DB[ship_name]
     # Utilisation du temps en millisecondes pour un ID unique (même si le nom est le même)
     new_id = int(time.time() * 1_000_000) 
-
-    # *** VÉRIFICATION ANTI-DOUBLON SUPPRIMÉE POUR PERMETTRE X2, X3, etc. ***
 
     price_usd = info.get("price", 0.0)
     
@@ -654,6 +652,8 @@ def catalogue_page():
     filtered = {}
     for name, data in SHIPS_DB.items():
         # Le filtre INGAME fonctionne maintenant car ships_data.py a forcé ingame: True pour tous.
+        # Donc on filtre uniquement sur les autres critères.
+        if purchase_source == "INGAME" and not data.get("ingame", True): continue # Si on filtre sur INGAME, on ignore les vaisseaux dont ingame n'est pas True (même si tous sont True maintenant)
         if brand_filter != "Tous" and data.get("brand") != brand_filter: continue
         if search_selection and name not in search_selection: continue
         filtered[name] = data
@@ -696,13 +696,13 @@ def catalogue_page():
                     else:
                         price_value = data.get('auec_price', 0)
                         
-                        # CORRECTION CRITIQUE DU BUG D'AFFICHAGE DU PRIX AUEC
+                        # CORRECTION CRITIQUE : Affiche la chaîne si c'en est une
                         if isinstance(price_value, (int, float)) and price_value > 0:
                             price_display = f"{price_value:,.0f} aUEC" 
                         elif isinstance(price_value, str):
                             price_display = price_value
                         else:
-                            price_display = "Prix non spécifié" # Sécurité
+                            price_display = "Prix non spécifié" # Au cas où
                             
                         price_class = "auec-price"
                         
@@ -777,29 +777,32 @@ def catalogue_page():
             }
             
             for key, value in specs_to_display.items():
-                if value not in ("N/A", "-", " Kg", " Kg", " m/s"):
+                if value not in ("N/A", "-", " Kg", " Kg", " m/s", None):
                     # Formatage léger pour les nombres massifs (ex: 44,237,159.00 Kg)
-                    if key == "Masse" and isinstance(value, str) and value.replace('.', '', 1).isdigit():
+                    formatted_value = value
+                    if key == "Masse" and isinstance(value, str):
                         try:
+                            # Tente de convertir en float, puis en int si possible, et formate
                             num_value = float(value.replace(' Kg', '').replace(' kg', '').replace(',', ''))
-                            formatted_value = f"{num_value:,.0f} kg"
+                            if num_value == int(num_value):
+                                formatted_value = f"{int(num_value):,.0f} kg"
+                            else:
+                                formatted_value = f"{num_value:,.2f} kg"
                         except ValueError:
-                            formatted_value = value
-                    else:
-                        formatted_value = value
-                        
+                            formatted_value = value # Retourne la chaîne originale si la conversion échoue
+                            
                     st.markdown(f"**{key} :** <span style='color:#FFF;'>{formatted_value}</span>", unsafe_allow_html=True)
 
 
             # --- Affichage du Prix FINAL ---
-            price_value = data.get('auec_price', 0) if st.session_state.selected_source == "INGAME" else data.get('price', 0)
+            price_value_raw = data.get('auec_price', 0) if st.session_state.selected_source == "INGAME" else data.get('price', 0)
             
-            if isinstance(price_value, str):
-                price_final_display = price_value
+            if isinstance(price_value_raw, str):
+                price_final_display = price_value_raw
             elif st.session_state.selected_source == "STORE":
-                price_final_display = f"${price_value:,.0f} USD (Valeur)"
-            else:
-                price_final_display = f"{price_value:,.0f} aUEC (Coût)"
+                price_final_display = f"${price_value_raw:,.0f} USD (Valeur)"
+            else: # INGAME, et c'est un nombre
+                price_final_display = f"{price_value_raw:,.0f} aUEC (Coût)"
             
             st.markdown(f"<h4 style='color:#30E8FF;'>ENREGISTREMENT : {price_final_display}</h4>", unsafe_allow_html=True)
 
