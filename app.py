@@ -874,7 +874,8 @@ def my_hangar_page():
     df_my["Prix_aUEC"] = pd.to_numeric(df_my["Prix_aUEC"], errors="coerce").fillna(0)
     
     # AJOUT DE L'ANCIENNE COLONNE 'Prix' À LA SUPPRESSION
-    columns_to_drop = ["id", "Image", "Propriétaire", "Prix"]
+    # 'Prix' est la colonne visible dans votre image qui doit disparaître
+    columns_to_drop = ["id", "Image", "Propriétaire", "Prix"] 
     
     st.caption(
         "❗ Utilisez **ACTUALISER** pour synchroniser les changements (Disponibilité / Suppression / Assurance) avec la base de données centrale."
@@ -894,22 +895,23 @@ def my_hangar_page():
             options=["LTI", "10 Ans", "6 Mois", "2 Mois", "Standard"],
             width="medium",
         ),
+        # CORRECTION AFFICHER PRIX USD EN VERT (COLONNE ACTIVE)
         "Prix_USD": st.column_config.NumberColumn(
             "VALEUR USD", 
             format="$%,.0f", 
-            # Conditionnel : Si la valeur est > 0 (valeur réelle), colore en vert
+            # Conditionnel : Si la valeur est > 0, colore en vert
             help="Valeur en dollars réels.",
-            background="rgba(0, 255, 0, 0.15)", # Vert très léger
-            text_color="#00ff00" # Vert
+            text_color=lambda x: "#00ff00" if x > 0 else "#666666" 
         ),
         "Prix_aUEC": st.column_config.NumberColumn(
             "COÛT aUEC", 
             format="%,.0f",
+            # Affichage normal, non actif pour le Store
         ),
     }
 
     st.markdown("## 💰 HANGAR STORE (Propriété USD)")
-    # RETRAIT DU ST.MARKDOWN QUI CAUSAIT LE '$0' RÉSIDUEL
+    # Le $0 visible est géré par la métrique ci-dessous si le toggle est désactivé.
     
     if not df_store.empty:
         total_usd = df_store["Prix_USD"].sum()
@@ -920,6 +922,9 @@ def my_hangar_page():
         col_usd.metric(
             "VALORISATION STORE", f"${total_usd:,.0f}" if show_usd else "---"
         )
+        
+        # Ajout d'un petit espace pour séparer visuellement la métrique du tableau
+        st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) 
 
         edited_store_display = st.data_editor(
             df_store_display,
@@ -930,7 +935,6 @@ def my_hangar_page():
                 "Rôle",
                 "Visuel",
                 "Source",
-                # Seul le prix USD devrait être visible, mais on désactive la modification des deux
                 "Prix_aUEC", 
                 "Prix_USD",
             ],
@@ -964,13 +968,12 @@ def my_hangar_page():
             "VALEUR USD", 
             format="$%,.0f", 
         ),
+        # CORRECTION AFFICHER PRIX AUEC EN TURQUOISE (COLONNE ACTIVE)
         "Prix_aUEC": st.column_config.NumberColumn(
             "COÛT aUEC", 
             format="%,.0f",
-            # Conditionnel : Si la valeur est > 0 (coût réel), colore en turquoise
             help="Coût en aUEC pour l'achat en jeu.",
-            background="rgba(48, 232, 255, 0.15)", # Turquoise très léger
-            text_color="#30e8ff" # Turquoise
+            text_color=lambda x: "#30e8ff" if x > 0 else "#666666" # Turquoise
         ),
     }
 
@@ -986,6 +989,8 @@ def my_hangar_page():
         col_aUEC.metric(
             "COÛT ACQUISITION", f"{total_aUEC:,.0f} aUEC" if show_aUEC else "---"
         )
+        
+        st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) 
 
         edited_ingame_display = st.data_editor(
             df_ingame_display,
