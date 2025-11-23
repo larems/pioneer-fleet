@@ -146,7 +146,7 @@ else:
     st.session_state.db = normalize_db_schema(st.session_state.db)
 
 
-# --- 3. FONCTIONS UTILITAIRES & ACTIONS (MODIFIÉ) ---
+# --- 3. FONCTIONS UTILITAIRES & ACTIONS ---
 
 
 @st.cache_data(show_spinner=False)
@@ -158,7 +158,7 @@ def get_local_img_as_base64(path):
                 data = f.read()
             encoded = base64.b64encode(data).decode()
             mime_type = "image/png" if path.lower().endswith(".png") else "image/jpeg"
-            return f"data:{mime_type};base64:{encoded}"
+            return f"data:{mime_type};base64,{encoded}"
         except Exception:
             pass
     # FIX: Remplacer le SVG potentiellement invalide par une chaîne vide pour éviter les crashs précoces
@@ -166,72 +166,66 @@ def get_local_img_as_base64(path):
 
 
 def select_ship(ship_name, source, insurance):
-    """Met à jour l'état de la session pour le vaisseau sélectionné dans le catalogue (Conservé, mais plus utilisé dans le nouveau flux Catalogue)."""
+    """Met à jour l'état de la session pour le vaisseau sélectionné dans le catalogue."""
     st.session_state.selected_ship_name = ship_name
     st.session_state.selected_source = source
     st.session_state.selected_insurance = insurance
 
 
-def add_selected_ships_action(selected_list: list, owner: str, source: str, insurance: str):
-    """Ajoute une liste de vaisseaux sélectionnés à la flotte (enregistrement de possession)."""
-    if not selected_list or not owner:
+def add_ship_action():
+    """Ajoute le vaisseau sélectionné à la flotte (enregistrement de possession)."""
+    ship_name = st.session_state.selected_ship_name
+    owner = st.session_state.current_pilot
+    source = st.session_state.selected_source
+    insurance = st.session_state.selected_insurance
+
+    if ship_name is None or ship_name not in SHIPS_DB or not owner:
         st.toast(
-            "Erreur d'ajout. Veuillez vous connecter et sélectionner des vaisseaux.",
+            "Erreur d'ajout. Veuillez vous connecter et sélectionner un vaisseau.",
             icon="❌",
         )
         return
 
-    ships_added = []
+    info = SHIPS_DB[ship_name]
+    # Utilisation du temps en millisecondes pour un ID unique (même si le nom est le même)
+    new_id = int(time.time() * 1_000_000) 
+
+    price_usd = info.get("price", 0.0)
+    price_aUEC_raw = info.get("auec_price", 0.0)
     
-    for ship_name in selected_list:
-        if ship_name not in SHIPS_DB:
-            continue
-            
-        info = SHIPS_DB[ship_name]
-        # Utilisation du temps en millisecondes + un index pour un ID unique
-        new_id = int(time.time() * 1_000_000) + len(st.session_state.db["fleet"]) + len(ships_added) 
-
-        price_usd = info.get("price", 0.0)
-        price_aUEC_raw = info.get("auec_price", 0.0)
-        
-        # Assure que la valeur est stockée dans le format attendu (nombre ou chaîne)
-        if isinstance(price_aUEC_raw, str):
-            price_aUEC = price_aUEC_raw
-        else:
-            price_aUEC = float(price_aUEC_raw or 0)
+    # Assure que la valeur est stockée dans le format attendu (nombre ou chaîne)
+    if isinstance(price_aUEC_raw, str):
+        price_aUEC = price_aUEC_raw
+    else:
+        price_aUEC = float(price_aUEC_raw or 0)
 
 
-        new_entry = {
-            "id": new_id,
-            "Propriétaire": owner,
-            "Vaisseau": ship_name,
-            "Marque": info.get("brand", "N/A"),
-            "Rôle": info.get("role", "Inconnu"),
-            "Dispo": False,
-            "Image": info.get("img", ""), # Chemin local du fichier, stocké dans la DB
-            "Visuel": "", # TRÈS IMPORTANT : Stocker vide pour ne pas dépasser 100KB
-            "Source": source,
-            "Prix_USD": float(price_usd or 0),
-            "Prix_aUEC": price_aUEC, 
-            "Assurance": insurance,
-            "Prix": None, 
-            "crew_max": info.get("crew_max", 1), 
-        }
+    new_entry = {
+        "id": new_id,
+        "Propriétaire": owner,
+        "Vaisseau": ship_name,
+        "Marque": info.get("brand", "N/A"),
+        "Rôle": info.get("role", "Inconnu"),
+        "Dispo": False,
+        "Image": info.get("img", ""), # Chemin local du fichier, stocké dans la DB
+        "Visuel": "", # TRÈS IMPORTANT : Stocker vide pour ne pas dépasser 100KB
+        "Source": source,
+        "Prix_USD": float(price_usd or 0),
+        "Prix_aUEC": price_aUEC, 
+        "Assurance": insurance,
+        "Prix": None, 
+        "crew_max": info.get("crew_max", 1), 
+    }
 
-        st.session_state.db["fleet"].append(new_entry)
-        ships_added.append(ship_name)
-    
-    
-    if ships_added:
-        st.session_state.db = normalize_db_schema(st.session_state.db)
+    st.session_state.db["fleet"].append(new_entry)
+    st.session_state.db = normalize_db_schema(st.session_state.db)
 
-        if save_db_to_cloud(st.session_state.db):
-            st.session_state.session_log.append(f"+ {len(ships_added)} vaisseaux enregistrés ({insurance})")
-            st.toast(f"✅ {len(ships_added)} VAISSEAU(X) ENREGISTRÉ(S) DANS HANGAR!", icon="🚀")
-            # Clear le selected_ship_name pour éviter de polluer l'affichage de droite
-            st.session_state.selected_ship_name = None 
-            time.sleep(0.4)
-            st.rerun()
+    if save_db_to_cloud(st.session_state.db):
+        st.session_state.session_log.append(f"+ {ship_name} enregistré ({insurance})")
+        st.toast(f"✅ {ship_name} ENREGISTRÉ DANS HANGAR!", icon="🚀")
+        st.session_state.selected_ship_name = None
+        time.sleep(0.4)
+        st.rerun()
 
 
 def refresh_prices_from_catalog(source_type: str):
@@ -418,33 +412,6 @@ p, div, span, label, .stMarkdown, .stText {{
     border-color: #30e8ff;
     box-shadow: 0 0 18px rgba(0, 212, 255, 0.35);
 }}
-
-/* AJOUT POUR LA SÉLECTION MULTIPLE (CHECKBOX) */
-.card-checkbox-overlay {{
-    position: absolute;
-    top: 10px;
-    left: 10px;
-    z-index: 2;
-}}
-
-/* Style appliqué au label personnalisé (la classe 'custom-ship-label' est injectée dans le HTML) */
-.custom-ship-label {{
-    /* Style par défaut pour la zone cliquable */
-    padding: 8px 12px;
-    border-radius: 6px;
-    border: 1px solid #00d4ff;
-    box-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
-    cursor: pointer;
-    display: inline-block;
-    transition: all 0.2s;
-}}
-
-/* IMPORTANT: Masquer la case à cocher native de Streamlit pour n'afficher que le label stylisé */
-/* Ceci doit cibler le parent du label pour masquer le widget complet (texte et case) */
-div[data-testid^="stCheckbox"] > label {{
-    display: none !important; /* Masquer le label Streamlit natif */
-}}
-
 .card-img-container {{
     width: 100%;
     height: 170px;
@@ -539,7 +506,7 @@ div[data-testid^="stCheckbox"] > label {{
     border-top: 1px solid #122433;
 }}
 
-/* Bouton de sélection sous la carte (MAINTENANT INUTILISÉ) */
+/* Bouton de sélection sous la carte */
 .card-footer-button {{
     margin-top: 0;
 }}
@@ -703,11 +670,9 @@ def catalogue_page():
     start = st.session_state.catalog_page * ITEMS_PER_PAGE
     current_items = items[start : start + ITEMS_PER_PAGE]
 
-    # --- FORMULAIRE GLOBAL POUR LA SÉLECTION MULTIPLE ---
     with col_main_catalogue:
         st.subheader("REGISTRE DES VAISSEAUX")
 
-        # PAGINATION
         c_prev, c_txt, c_next = st.columns([1, 4, 1])
         if total_pages > 1:
             with c_prev:
@@ -718,79 +683,43 @@ def catalogue_page():
                 if st.button("SUIV. ►", key="n1", disabled=(st.session_state.catalog_page == total_pages - 1)): st.session_state.catalog_page += 1; st.rerun()
 
         st.markdown("---")
-        
-        # Utilisation d'un formulaire pour regrouper toutes les sélections et la soumission
-        with st.form("bulk_ship_acquisition_form"):
-            
-            if not current_items:
-                st.info("Aucun vaisseau ne correspond aux filtres sélectionnés.")
-            else:
-                cols = st.columns(2)
-                for i, (name, data) in enumerate(current_items):
-                    with cols[i % 2]:
-                        img_b64 = get_local_img_as_base64(data.get("img", ""))
-                        
-                        # LOGIQUE D'AFFICHAGE DU PRIX
-                        if purchase_source == "STORE":
-                            price_value = data.get('price', 0)
-                            if isinstance(price_value, (int, float)):
-                                price_display = f"${price_value:,.2f} USD"
-                            else: 
-                                price_display = str(price_value) 
-                            price_class = "usd-price"
-                        else: # source == "INGAME"
-                            price_value = data.get('auec_price', 0)
-                            
-                            if isinstance(price_value, (int, float)) and price_value > 0:
-                                price_display = f"{price_value:,.0f} aUEC" 
-                            elif isinstance(price_value, str):
-                                price_display = price_value
-                            else:
-                                price_display = "Prix non spécifié" 
-                                
-                            price_class = "auec-price"
-                            
-                        role = data.get("role", "Inconnu")
-                        brand = data.get("brand", "N/A")
 
-                        # NOUVEAU: Case à cocher pour la sélection (widget Streamlit invisible)
-                        checkbox_key = f"check_{name}"
+        if not current_items:
+            st.info("Aucun vaisseau ne correspond aux filtres sélectionnés.")
+        else:
+            cols = st.columns(2)
+            for i, (name, data) in enumerate(current_items):
+                with cols[i % 2]:
+                    img_b64 = get_local_img_as_base64(data.get("img", ""))
+                    
+                    if purchase_source == "STORE":
+                        price_value = data.get('price', 0)
+                        if isinstance(price_value, (int, float)):
+                            price_display = f"${price_value:,.2f} USD"
+                        else: 
+                            price_display = str(price_value) 
+                        price_class = "usd-price"
+                    else: # source == "INGAME"
+                        price_value = data.get('auec_price', 0)
                         
-                        # 1. Widget Streamlit (fonctionnalité)
-                        is_selected = st.checkbox(
-                            f"SÉLECTIONNER", 
-                            key=checkbox_key, 
-                            value=False, 
-                            label_visibility="collapsed", 
-                        )
-                        
-                        # 2. Styles dynamiques pour le label HTML
-                        selected_class = "selected-card" if is_selected else ""
-                        label_text = f"✅ SÉLECTIONNÉ" if is_selected else "☐ SÉLECTIONNER"
-                        
-                        # Couleurs en fonction de l'état (pour le style en ligne)
-                        if is_selected:
-                            label_color = '#041623'
-                            label_background = '#00d4ff'
+                        # CORRECTION CRITIQUE : Gère la chaîne "Non achetable en jeu"
+                        if isinstance(price_value, (int, float)) and price_value > 0:
+                            price_display = f"{price_value:,.0f} aUEC" 
+                        elif isinstance(price_value, str):
+                            price_display = price_value
                         else:
-                            label_color = '#ffffff'
-                            label_background = 'rgba(4, 20, 35, 0.9)'
-
-
-                        st.markdown(f"""
+                            price_display = "Prix non spécifié" 
+                            
+                        price_class = "auec-price"
+                        
+                    role = data.get("role", "Inconnu")
+                    brand = data.get("brand", "N/A")
+                    is_selected = st.session_state.selected_ship_name == name
+                    selected_class = "selected-card" if is_selected else ""
+                    
+                    st.markdown(f"""
 <div class="catalog-card-wrapper">
   <div class="catalog-card {selected_class}">
-    <div class="card-checkbox-overlay">
-        
-        <label for="{checkbox_key}" class="custom-ship-label" style="
-            background: {label_background};
-            color: {label_color};
-        ">
-            <span style="font-family: 'Orbitron', sans-serif; font-weight: 700;">
-                {label_text}
-            </span>
-        </label>
-    </div>
     <div class="card-img-container">
       <img src="{img_b64}" class="card-img">
       <span class="card-brand-top">{brand}</span>
@@ -809,69 +738,94 @@ def catalogue_page():
   </div>
 </div>
 """, unsafe_allow_html=True)
-                        
 
-            st.markdown("---")
-            # --- BOUTON DE SOUMISSION UNIQUE DU FORMULAIRE ---
-            submit_button = st.form_submit_button(
-                "✅ ENREGISTRER LA SÉLECTION DANS MON HANGAR",
-                type="primary",
-                use_container_width=True,
-            )
-
-        # --- LOGIQUE DE TRAITEMENT DU FORMULAIRE APRÈS SOUMISSION ---
-        if submit_button:
-            if not st.session_state.current_pilot:
-                st.error("Veuillez vous connecter pour enregistrer des vaisseaux.")
-            else:
-                # 1. Identifier tous les vaisseaux qui ont été cochés
-                selected_ship_names = []
-                
-                # On itère sur les items affichés (et donc soumis dans le formulaire)
-                for ship_name, _ in current_items: 
-                    checkbox_key = f"check_{ship_name}"
-                    # On vérifie l'état de la checkbox dans la session (mis à jour par le form submission)
-                    if st.session_state.get(checkbox_key):
-                        selected_ship_names.append(ship_name)
-                    
-                if not selected_ship_names:
-                    st.warning("Aucun vaisseau n'a été coché pour l'enregistrement. Veuillez cocher au moins un vaisseau.")
-                else:
-                    # 2. Appeler la nouvelle fonction d'ajout avec la liste
-                    add_selected_ships_action(
-                        selected_ship_names,
-                        st.session_state.current_pilot,
-                        st.session_state.selected_source,
-                        st.session_state.selected_insurance
-                    )
-
+                    st.markdown("<div class='card-footer-button'>", unsafe_allow_html=True)
+                    if st.button("Sélectionner ce vaisseau", key=f"select_{name}", use_container_width=True):
+                        select_ship(name, purchase_source, selected_insurance)
+                        st.rerun()
+                    st.markdown("</div>", unsafe_allow_html=True)
 
     with col_commander:
         st.subheader("ACQUISITION LOGISTIQUE")
-        
+        selected_name = st.session_state.selected_ship_name
+
         if st.session_state.current_pilot:
             pilot_data = st.session_state.db.get("user_data", {}).get(st.session_state.current_pilot, {})
             current_auec_balance = pilot_data.get("auec_balance", 0)
             st.markdown(f"<h4 style='color:#30e8ff;'>Solde aUEC : {current_auec_balance:,.0f}</h4>", unsafe_allow_html=True)
             st.markdown("---")
 
-        
-        st.markdown("**MODE OPÉRATIONNEL :**")
-        st.markdown(f"<span style='color:#FFF; font-weight:bold;'>ENREGISTREMENT EN BLOC</span>", unsafe_allow_html=True)
-        st.markdown("---")
-        
-        st.markdown(f"**SOURCE SÉLECTIONNÉE :** <span style='color:#FFF;'>{st.session_state.selected_source}</span>", unsafe_allow_html=True)
-        st.markdown(f"**ASSURANCE SÉLECTIONNÉE :** <span style='color:#FFF;'>{st.session_state.selected_insurance}</span>", unsafe_allow_html=True)
-        
-        st.markdown("---")
-        st.caption("Instructions de l'enregistrement en bloc:")
-        st.markdown("1. Choisissez la **Source** et l'**Assurance** à gauche.")
-        st.markdown("2. **Cochez** les vaisseaux que vous possédez dans le registre principal.")
-        st.markdown("3. Cliquez sur le bouton **'✅ ENREGISTRER LA SÉLECTION...'** en bas du registre pour valider l'ensemble.")
-        st.markdown("*Note : Les options de la colonne de gauche s'appliquent à **tous** les vaisseaux cochés sur la page actuelle lors de la soumission.*")
-        
-        if not st.session_state.current_pilot:
-            st.info("Connectez-vous pour enregistrer un vaisseau.")
+        if selected_name and selected_name in SHIPS_DB:
+            info = SHIPS_DB[selected_name]
+
+            st.markdown("**VAISSEAU SÉLECTIONNÉ :**")
+            st.markdown(f"<div class='ships-name'>{selected_name}</div>", unsafe_allow_html=True)
+
+            img_path = info.get("img", "")
+            if os.path.exists(img_path):
+                st.image(img_path, use_container_width=True)
+
+            st.markdown(f"**SOURCE :** <span style='color:#FFF;'>{st.session_state.selected_source}</span>", unsafe_allow_html=True)
+            st.markdown(f"**ASSURANCE :** <span style='color:#FFF;'>{st.session_state.selected_insurance}</span>", unsafe_allow_html=True)
+            
+            crew_max = info.get("crew_max", 1)
+            st.markdown(f"**CREW MAX :** <span style='color:#FFF;'>{crew_max}</span>", unsafe_allow_html=True)
+            
+            # --- AFFICHAGE DES SPÉCIFICATIONS TECHNIQUES (Nouveaux champs du JSON) ---
+            st.markdown("---")
+            st.markdown("**SPÉCIFICATIONS TECHNIQUES**")
+            
+            specs_to_display = {
+                "Longueur": info.get("Length", "N/A"),
+                "Masse": info.get("Mass", "N/A"),
+                "Capacité Cargo (SCU)": info.get("Cargocapacity", "N/A"),
+                "Vitesse Max": info.get("Speed", "N/A"),
+            }
+            
+            for key, value in specs_to_display.items():
+                if value not in ("N/A", "-", " Kg", " Kg", " m/s", None):
+                    formatted_value = value
+                    if key == "Masse" and isinstance(value, str):
+                        try:
+                            num_value = float(value.replace(' Kg', '').replace(' kg', '').replace(',', ''))
+                            if num_value == int(num_value):
+                                formatted_value = f"{int(num_value):,.0f} kg"
+                            else:
+                                formatted_value = f"{num_value:,.2f} kg"
+                        except ValueError:
+                            formatted_value = value
+                            
+                    st.markdown(f"**{key} :** <span style='color:#FFF;'>{formatted_value}</span>", unsafe_allow_html=True)
+
+
+            # --- Affichage du Prix FINAL ---
+            price_value_raw = data.get('auec_price', 0) if st.session_state.selected_source == "INGAME" else data.get('price', 0)
+            
+            if isinstance(price_value_raw, str):
+                price_final_display = price_value_raw
+            elif st.session_state.selected_source == "STORE":
+                price_final_display = f"${price_value_raw:,.0f} USD (Valeur)"
+            else: # INGAME, et c'est un nombre
+                price_final_display = f"{price_value_raw:,.0f} aUEC (Coût)"
+            
+            st.markdown(f"<h4 style='color:#30E8FF;'>ENREGISTREMENT : {price_final_display}</h4>", unsafe_allow_html=True)
+
+
+            if st.session_state.current_pilot:
+                if st.button(f"✅ ENREGISTRER {selected_name} DANS MON HANGAR", type="primary", use_container_width=True):
+                    add_ship_action()
+        else:
+            if st.session_state.current_pilot:
+                st.info("Sélectionnez un vaisseau dans le registre pour afficher les options d'enregistrement.")
+            else:
+                st.info("Connectez-vous pour enregistrer un vaisseau.")
+
+            st.markdown("---")
+            st.caption("Instructions:")
+            st.markdown("* Choisissez la source et l'assurance à gauche.")
+            st.markdown("* Cliquez sur le bouton sous la carte pour le sélectionner.")
+            if st.session_state.current_pilot:
+                st.markdown("* Confirmez l'enregistrement ici.")
 
 
 def my_hangar_page():
@@ -1387,11 +1341,7 @@ def corpo_fleet_page():
         if source == 'STORE':
             return f"${info.get('price', 0):,.0f} USD"
         else:
-            price_raw = info.get('auec_price', 0)
-            if isinstance(price_raw, (int, float)):
-                return f"{price_raw:,.0f} aUEC"
-            else:
-                return str(price_raw)
+            return f"{info.get('auec_price', 0):,.0f} aUEC"
 
 
     display_for_table['Prix'] = display_for_table.apply(calculate_aggregated_price, axis=1)
