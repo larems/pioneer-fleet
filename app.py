@@ -292,18 +292,12 @@ p, div, span, label, .stMarkdown, .stText {{
     color: #e0e0e0;
 }}
 
-/* AJOUT STYLES POUR PRIX ACTIF DANS DATA EDITOR */
-/* Colonne VALEUR USD affichée en vert */
-.stDataFrame td:nth-child(7), .stDataFrame th:nth-child(7) {{
-    color: #00ff00 !important; /* Couleur verte */
-    font-weight: bold;
-}}
-/* Colonne COÛT aUEC affichée en vert */
+/* Réinitialisation des styles de prix spécifiques pour laisser le formatage des colonnes le gérer */
+.stDataFrame td:nth-child(7), .stDataFrame th:nth-child(7),
 .stDataFrame td:nth-child(8), .stDataFrame th:nth-child(8) {{
-    color: #30e8ff !important; /* Couleur turquoise */
-    font-weight: bold;
+    color: inherit !important;
+    font-weight: normal !important;
 }}
-
 
 /* CARTES CATALOGUE */
 .catalog-card-wrapper {{
@@ -440,7 +434,7 @@ div.card-footer-button > div.stButton > button {{
     padding: 8px 0;
     font-weight: 700;
 }}
-div.card-footer-button > div.stButton > button:hover {{
+div.stButton > button:hover {{
     filter: brightness(1.05);
     box-shadow: 0 0 12px rgba(0, 212, 255, 0.75);
 }}
@@ -878,27 +872,10 @@ def my_hangar_page():
     # CORRECTION DES PRIX: Assurer la conversion des colonnes en numérique au début
     df_my["Prix_USD"] = pd.to_numeric(df_my["Prix_USD"], errors="coerce").fillna(0)
     df_my["Prix_aUEC"] = pd.to_numeric(df_my["Prix_aUEC"], errors="coerce").fillna(0)
-
-    # --- CONFIGURATION DES COLONNES POUR UN AFFICHAGE CLAIR DU PRIX ACTIF ---
-    # Col 7 = Prix_USD, Col 8 = Prix_aUEC
-
-    editable_columns_base = {
-        "Dispo": st.column_config.CheckboxColumn("OPÉRATIONNEL ?", width="small"),
-        "Supprimer": st.column_config.CheckboxColumn("SUPPRIMER", width="small"),
-        "Visuel": st.column_config.ImageColumn("APERÇU", width="small"),
-        "Assurance": st.column_config.SelectboxColumn(
-            "ASSURANCE",
-            options=["LTI", "10 Ans", "6 Mois", "2 Mois", "Standard"],
-            width="medium",
-        ),
-        "id": None,
-        "Image": None,
-        "Propriétaire": None,
-    }
     
-    # Colonnes à masquer dans les deux tableaux
-    columns_to_drop = ["id", "Image", "Propriétaire"]
-
+    # AJOUT DE L'ANCIENNE COLONNE 'Prix' À LA SUPPRESSION
+    columns_to_drop = ["id", "Image", "Propriétaire", "Prix"]
+    
     st.caption(
         "❗ Utilisez **ACTUALISER** pour synchroniser les changements (Disponibilité / Suppression / Assurance) avec la base de données centrale."
     )
@@ -907,21 +884,33 @@ def my_hangar_page():
     df_store = df_my[df_my["Source"] == "STORE"].reset_index(drop=True).copy()
     df_store_display = df_store.drop(columns=columns_to_drop, errors="ignore")
     
-    # Configuration spécifique pour le Store: USD actif (vert), aUEC désactivé (pas de couleur)
-    editable_columns_store = editable_columns_base.copy()
-    editable_columns_store["Prix_USD"] = st.column_config.NumberColumn(
-        "VALEUR USD", 
-        format="$%,.0f", 
-        # Configuration CSS : La 7ème colonne (Prix_USD) sera verte par défaut (voir section 4. CSS)
-    )
-    editable_columns_store["Prix_aUEC"] = st.column_config.NumberColumn(
-        "COÛT aUEC", 
-        format="%,.0f",
-        # Affichage du coût aUEC mais sans surlignage par défaut (désactivé plus bas)
-    )
+    # Configuration spécifique pour le Store: USD actif (vert)
+    editable_columns_store = {
+        "Dispo": st.column_config.CheckboxColumn("OPÉRATIONNEL ?", width="small"),
+        "Supprimer": st.column_config.CheckboxColumn("SUPPRIMER", width="small"),
+        "Visuel": st.column_config.ImageColumn("APERÇU", width="small"),
+        "Assurance": st.column_config.SelectboxColumn(
+            "ASSURANCE",
+            options=["LTI", "10 Ans", "6 Mois", "2 Mois", "Standard"],
+            width="medium",
+        ),
+        "Prix_USD": st.column_config.NumberColumn(
+            "VALEUR USD", 
+            format="$%,.0f", 
+            # Conditionnel : Si la valeur est > 0 (valeur réelle), colore en vert
+            help="Valeur en dollars réels.",
+            background="rgba(0, 255, 0, 0.15)", # Vert très léger
+            text_color="#00ff00" # Vert
+        ),
+        "Prix_aUEC": st.column_config.NumberColumn(
+            "COÛT aUEC", 
+            format="%,.0f",
+        ),
+    }
 
     st.markdown("## 💰 HANGAR STORE (Propriété USD)")
-
+    # RETRAIT DU ST.MARKDOWN QUI CAUSAIT LE '$0' RÉSIDUEL
+    
     if not df_store.empty:
         total_usd = df_store["Prix_USD"].sum()
         col_usd, col_toggle_usd = st.columns([3, 1])
@@ -941,9 +930,9 @@ def my_hangar_page():
                 "Rôle",
                 "Visuel",
                 "Source",
-                # Désactiver la colonne Prix_aUEC pour le store (colonne 8)
+                # Seul le prix USD devrait être visible, mais on désactive la modification des deux
                 "Prix_aUEC", 
-                "Prix_USD", # Désactiver la modification de la valeur USD
+                "Prix_USD",
             ],
             hide_index=True,
             use_container_width=True,
@@ -961,18 +950,30 @@ def my_hangar_page():
     df_ingame = df_my[df_my["Source"] == "INGAME"].reset_index(drop=True).copy()
     df_ingame_display = df_ingame.drop(columns=columns_to_drop, errors="ignore")
     
-    # Configuration spécifique pour Ingame: aUEC actif (turquoise), USD désactivé (pas de couleur)
-    editable_columns_ingame = editable_columns_base.copy()
-    editable_columns_ingame["Prix_USD"] = st.column_config.NumberColumn(
-        "VALEUR USD", 
-        format="$%,.0f", 
-        # Affichage de la valeur USD mais sans surlignage par défaut (désactivé plus bas)
-    )
-    editable_columns_ingame["Prix_aUEC"] = st.column_config.NumberColumn(
-        "COÛT aUEC", 
-        format="%,.0f",
-        # Configuration CSS : La 8ème colonne (Prix_aUEC) sera turquoise par défaut (voir section 4. CSS)
-    )
+    # Configuration spécifique pour Ingame: aUEC actif (turquoise)
+    editable_columns_ingame = {
+        "Dispo": st.column_config.CheckboxColumn("OPÉRATIONNEL ?", width="small"),
+        "Supprimer": st.column_config.CheckboxColumn("SUPPRIMER", width="small"),
+        "Visuel": st.column_config.ImageColumn("APERÇU", width="small"),
+        "Assurance": st.column_config.SelectboxColumn(
+            "ASSURANCE",
+            options=["LTI", "10 Ans", "6 Mois", "2 Mois", "Standard"],
+            width="medium",
+        ),
+        "Prix_USD": st.column_config.NumberColumn(
+            "VALEUR USD", 
+            format="$%,.0f", 
+        ),
+        "Prix_aUEC": st.column_config.NumberColumn(
+            "COÛT aUEC", 
+            format="%,.0f",
+            # Conditionnel : Si la valeur est > 0 (coût réel), colore en turquoise
+            help="Coût en aUEC pour l'achat en jeu.",
+            background="rgba(48, 232, 255, 0.15)", # Turquoise très léger
+            text_color="#30e8ff" # Turquoise
+        ),
+    }
+
 
     st.markdown("## 💸 HANGAR INGAME (Acquisition aUEC)")
 
@@ -995,8 +996,7 @@ def my_hangar_page():
                 "Rôle",
                 "Visuel",
                 "Source",
-                "Prix_aUEC", # Désactiver la modification de la valeur aUEC
-                # Désactiver la colonne Prix_USD pour Ingame (colonne 7)
+                "Prix_aUEC",
                 "Prix_USD",
             ],
             hide_index=True,
@@ -1056,11 +1056,10 @@ def corpo_fleet_page():
 
     st.markdown("---")
     
-    # NOUVEL AFFICHAGE DES KPI AVEC TOGGLE
+    # AFFICHAGE DES KPI AVEC TOGGLE
     col_kpi, col_toggle = st.columns([4, 1])
     
     with col_toggle:
-        # Toggle pour afficher/cacher les valeurs
         show_value_kpi = st.toggle(
             "Afficher Valorisation Totale", 
             value=False, 
@@ -1070,7 +1069,6 @@ def corpo_fleet_page():
     with col_kpi:
         c1, c2, c3, c4, c5 = st.columns(5)
         
-        # Affichage conditionnel des valeurs monétaires
         value_usd_display = f"${total_value_usd:,.0f}" if show_value_kpi else "---"
         value_aUEC_display = f"{total_value_aUEC:,.0f} aUEC" if show_value_kpi else "---"
         
