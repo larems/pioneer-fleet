@@ -16,7 +16,7 @@ st.set_page_config(
 BACKGROUND_IMAGE = "assets/fondecransite.png"
 
 # --- 2. GESTION DATABASE (JSONBIN.IO) ---
-# NOTE: L'ID est celui que vous avez fourni en dernier.
+# NOTE: J'utilise l'ID du bin que vous avez fourni précédemment (fonctionnel pour l'erreur 404).
 JSONBIN_ID = "6921f0ded0ea881f40f9433f" 
 JSONBIN_KEY = "" # Clé MASTER KEY JSONBin.io (laissez vide pour lecture seule en mode dev)
 
@@ -855,6 +855,8 @@ def my_hangar_page():
 
         # Conversion des prix en numérique pour les calculs de totaux (les chaînes deviennent 0)
         df_my["Prix_USD"] = pd.to_numeric(df_my["Prix_USD"], errors="coerce").fillna(0)
+        
+        # Le prix aUEC peut être un nombre ou une chaîne. On le convertit en numérique pour le calcul du total.
         df_my["Prix_aUEC_Num"] = df_my["Prix_aUEC"].apply(lambda x: float(x) if isinstance(x, (int, float)) else 0)
 
         # --- AFFICHAGE DES KPIS (TOTAUX) ---
@@ -887,25 +889,33 @@ def my_hangar_page():
             ].copy()
 
         # Re-séparation du DataFrame filtré pour l'affichage
+        # Correction critique: Appliquer reset_index() pour garantir des index propres après filtrage
         df_store = df_filtered[df_filtered["Source"] == "STORE"].reset_index(drop=True).copy()
         df_ingame = df_filtered[df_filtered["Source"] == "INGAME"].reset_index(drop=True).copy()
         
+        
         # Correction : Forcer la Base64 des images locales pour l'aperçu du tableau
-        df_my['Visuel'] = df_my['Image'].apply(get_local_img_as_base64)
+        df_store['Visuel'] = df_store['Image'].apply(get_local_img_as_base64)
+        df_ingame['Visuel'] = df_ingame['Image'].apply(get_local_img_as_base64)
 
         # 1. Calcul de la colonne de prix unique pour l'affichage
-        df_my["Prix_Acquisition"] = df_my.apply(
-            lambda row: (
-                f"{row['Prix_aUEC_Num']:,.0f} aUEC"
-                if row["Source"] == "INGAME" and row['Prix_aUEC_Num'] > 0
-                else row['Prix_aUEC']
-                if row["Source"] == "INGAME" and isinstance(row["Prix_aUEC"], str) # Affiche la chaîne descriptive
-                else f"${row['Prix_USD']:,.0f} USD"
-                if row["Source"] == "STORE" and row["Prix_USD"] > 0
-                else "N/A"
-            ),
-            axis=1,
-        )
+        def get_price_display(row):
+            if row["Source"] == "INGAME":
+                if isinstance(row["Prix_aUEC"], str):
+                    return row['Prix_aUEC']
+                elif row['Prix_aUEC_Num'] > 0:
+                    return f"{row['Prix_aUEC_Num']:,.0f} aUEC"
+                else:
+                    return "N/A"
+            else: # Source == "STORE"
+                if row["Prix_USD"] > 0:
+                    return f"${row['Prix_USD']:,.0f} USD"
+                else:
+                    return "N/A"
+
+        df_store["Prix_Acquisition"] = df_store.apply(get_price_display, axis=1)
+        df_ingame["Prix_Acquisition"] = df_ingame.apply(get_price_display, axis=1)
+
 
         # Colonnes visibles et configurées
         columns_for_display = [
@@ -938,6 +948,7 @@ def my_hangar_page():
             "Rôle": st.column_config.TextColumn("Rôle", disabled=True, width="small"),
         }
         
+        # Colonnes à désactiver dans l'éditeur (sauf les champs modifiables)
         disabled_cols = [col for col in editable_columns_base.keys() if col not in ["Dispo", "Assurance", "Supprimer"]]
 
         
@@ -1026,6 +1037,7 @@ def render_acquisition_tracking(current_auec_balance, final_target_name):
     st.markdown("## 🎯 SUIVI D'ACQUISITION FUTURE (aUEC)")
     
     # Liste de tous les vaisseaux achetable en aUEC pour le sélecteur cible
+    # Utilisation du champ 'ingame' du catalogue pour le sélecteur
     ingame_ships = sorted([name for name, data in SHIPS_DB.items() if data.get('ingame', False)])
     ingame_options = ["— Sélectionner un objectif —"] + ingame_ships
     
@@ -1085,13 +1097,7 @@ def render_acquisition_tracking(current_auec_balance, final_target_name):
     # --- AFFICHAGE DE LA PROGRESSION (Calculé à partir des valeurs sauvegardées) ---
     if final_target_name and final_target_name in SHIPS_DB:
         target_info = SHIPS_DB[final_target_name]
-        # Utilisation de la valeur réelle stockée dans SHIPS_DB
-        cost_auec_raw = target_info.get('auec_price', 0)
-        
-        try:
-            cost_auec = float(cost_auec_raw)
-        except (ValueError, TypeError):
-            cost_auec = 0 
+        cost_auec = float(target_info.get('auec_price', 0) or 0)
         
         if cost_auec > 0:
             st.markdown("---")
@@ -1146,7 +1152,6 @@ def corpo_fleet_page():
     df_global["Prix_USD"] = pd.to_numeric(df_global["Prix_USD"], errors="coerce").fillna(
         0
     )
-    # Utilisation de la colonne numérique pour les calculs globaux
     df_global["Prix_aUEC_Num"] = df_global["Prix_aUEC"].apply(lambda x: float(x) if isinstance(x, (int, float)) else 0)
 
     # Joindre le Crew Max à partir de SHIPS_DB (pour les totaux et graphiques)
