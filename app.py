@@ -341,7 +341,7 @@ def process_fleet_updates(edited_df: pd.DataFrame):
         )
 
 
-# --- 4. CSS (Styles optimisés) (MODIFIÉ) ---
+# --- 4. CSS (Styles optimisés) (CORRIGÉ) ---
 bg_img_code = get_local_img_as_base64(BACKGROUND_IMAGE)
 
 st.markdown(
@@ -420,28 +420,28 @@ p, div, span, label, .stMarkdown, .stText {{
 }}
 
 /* AJOUT POUR LA SÉLECTION MULTIPLE (CHECKBOX) */
-.card-checkbox-overlay {
+.card-checkbox-overlay {{
     position: absolute;
     top: 10px;
     left: 10px;
     z-index: 2;
-}
-.card-checkbox-overlay .stCheckbox > label {
+}}
+.card-checkbox-overlay .stCheckbox > label {{
     background: rgba(4, 20, 35, 0.9);
     padding: 8px 12px;
     border-radius: 6px;
     border: 1px solid #00d4ff;
     box-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
     transition: all 0.2s;
-}
-.card-checkbox-overlay .stCheckbox > label:hover {
+}}
+.card-checkbox-overlay .stCheckbox > label:hover {{
     background: #00d4ff;
     color: #041623;
-}
+}}
 /* IMPORTANT: Masquer la case à cocher native de Streamlit pour n'afficher que le label stylisé */
-div[data-testid^="stCheckbox"] > label > div:first-child {
+div[data-testid^="stCheckbox"] > label > div:first-child {{
     display: none !important;
-}
+}}
 
 .card-img-container {{
     width: 100%;
