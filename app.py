@@ -109,7 +109,8 @@ def save_db_to_cloud(data):
         response = requests.put(url, json=data, headers=headers, timeout=10)
         # FIX: Tolérer le statut 403 si la sauvegarde fonctionne malgré tout (bug JSONBin/Streamlit)
         if response.status_code not in (200, 204, 403): 
-            st.error(f"Erreur de sauvegarde DB: Statut {response.status_code}")
+            # Si le statut est autre que succès (200/204) ou l'erreur signalée (403), on affiche l'erreur.
+            st.error(f"Erreur de sauvegarde DB: Statut {response.status_code}. Vérifiez votre clé JSONBin.io.")
             return False
     except requests.exceptions.RequestException as e:
         st.error(f"Erreur réseau/timeout lors de la sauvegarde: {e}")
@@ -489,8 +490,8 @@ div.card-footer-button > div.stButton > button {{
     font-weight: 700;
 }}
 div.stButton > button:hover {{
-    filter: brightness(1.05);
-    box-shadow: 0 0 12px rgba(0, 212, 255, 0.75);
+    border-color: #00d4ff;
+    color: #00d4ff;
 }}
 
 /* Boutons généraux */
@@ -1281,7 +1282,7 @@ def corpo_fleet_page():
 
     # 1) Donut par Marque (nombre d'unités)
     summary_brand = df_global.groupby("Marque").size().reset_index(name="Quantité")
-    summary_brand = summary_brand.sort_values("Quantité", ascending=False)
+    summary_brand = summary_role.sort_values("Quantité", ascending=False)
 
     fig_brand = px.pie(
         summary_brand,
