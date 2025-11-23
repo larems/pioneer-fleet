@@ -2,7 +2,9 @@
 import json
 from typing import Dict, Any
 
-# --- 1. BASE DE CONNAISSANCE CORRIGÉE (Prix aUEC et Statut ajustés pour les vaisseaux Crusader) ---
+# --- 1. BASE DE CONNAISSANCE UNIFIÉE (Prix, Rôle, Image locale) ---
+# NOTE: Le statut 'ingame' est forcé à True ici pour assurer l'affichage dans l'onglet INGAME/aUEC.
+# Les prix aUEC réels sont mis à jour pour le C1 Spirit (3.2M) et A1 Spirit (3.8M).
 BASE_CATALOG_DATA = {
     "100i": {"price": 50, "role": "Starter Luxe", "brand": "Origin", "ingame": True, "auec_price": 700000, "img": "assets/100i.webp", "crew_max": 1},
     "125a": {"price": 60, "role": "Combat Léger", "brand": "Origin", "ingame": True, "auec_price": 800000, "img": "assets/125a.webp", "crew_max": 1},
@@ -21,7 +23,7 @@ BASE_CATALOG_DATA = {
     "Clipper": {"price": 150, "role": "Fret Léger", "brand": "MISC", "ingame": True, "auec_price": 600000, "img": "assets/Clipper.webp", "crew_max": 1},
     "Constellation Andromeda": {"price": 240, "role": "Polyvalent", "brand": "RSI", "ingame": True, "auec_price": 4000000, "img": "assets/Constellation Andromeda.webp", "crew_max": 4},
     "Golemx OX": {"price": 60, "role": "Minage", "brand": "Drake", "ingame": True, "auec_price": 0, "img": "assets/Golemx OX.webp", "crew_max": 2},
-    "A1 Spirit": {"price": 125, "role": "Bombardier Léger", "brand": "Crusader", "ingame": True, "auec_price": 3800000, "img": "assets/a1 spirit.webp", "crew_max": 1}, # PRIX CORRIGÉ
+    "A1 Spirit": {"price": 125, "role": "Bombardier Léger", "brand": "Crusader", "ingame": True, "auec_price": 3800000, "img": "assets/a1 spirit.webp", "crew_max": 1},
     "A2 Hercules": {"price": 750, "role": "Bombardier", "brand": "Crusader", "ingame": True, "auec_price": 15000000, "img": "assets/a2 hercules.webp", "crew_max": 4},
     "Anvil Ballista Dunestalker": {"price": 140, "role": "DCA", "brand": "Anvil", "ingame": True, "auec_price": 1900000, "img": "assets/anvil ballista dunestalker.webp", "crew_max": 2},
     "Anvil Ballista Snowblind": {"price": 140, "role": "DCA", "brand": "Anvil", "ingame": True, "auec_price": 1900000, "img": "assets/anvil ballista snowblind.webp", "crew_max": 2},
@@ -82,7 +84,7 @@ BASE_CATALOG_DATA = {
     "Defender": {"price": 220, "role": "Chasseur Alien", "brand": "Banu", "ingame": True, "auec_price": 3600000, "img": "assets/defender.webp", "crew_max": 2},
     "Dragonfly Black": {"price": 40, "role": "Gravlev", "brand": "Drake", "ingame": True, "auec_price": 150000, "img": "assets/dragonfly black.webp", "crew_max": 2},
     "Dragonfly Yellowjacket": {"price": 40, "role": "Gravlev", "brand": "Drake", "ingame": True, "auec_price": 150000, "img": "assets/dragonfly yellowjacket.webp", "crew_max": 2},
-    "E1 Spirit": {"price": 150, "role": "Luxe / Transport", "brand": "Crusader", "ingame": True, "auec_price": 0, "img": "assets/e1 spirit.webp", "crew_max": 1}, # CORRIGÉ À TRUE
+    "E1 Spirit": {"price": 150, "role": "Luxe / Transport", "brand": "Crusader", "ingame": True, "auec_price": 0, "img": "assets/e1 spirit.webp", "crew_max": 1}, # CORRIGÉ À TRUE, PRIX À 0
     "Eclipse": {"price": 300, "role": "Bombardier Furtif", "brand": "Aegis", "ingame": True, "auec_price": 6000000, "img": "assets/eclipse.webp", "crew_max": 1},
     "Endeavor": {"price": 350, "role": "Science", "brand": "MISC", "ingame": True, "auec_price": 0, "img": "assets/endeavor.webp", "crew_max": 4},
     "Expanse": {"price": 150, "role": "Raffinage", "brand": "MISC", "ingame": True, "auec_price": 0, "img": "assets/expanse.webp", "crew_max": 1},
@@ -251,8 +253,7 @@ BASE_CATALOG_DATA = {
 # --- 2. FONCTIONS DE FUSION ET DE NETTOYAGE DES DONNÉES ---
 
 def clean_name(name: str) -> str:
-    """Nettoie et normalise le nom du vaisseau pour la clé de fusion."""
-    # J'ai simplifié et généralisé cette fonction pour qu'elle soit plus robuste
+    """Nettoie et normalise le nom du vaisseau pour la clé de fusion (match scrap.json)."""
     name = name.lower()
     replacements = {
         "best in show edition 2949": "", "expedition w/c8x": "w c8x", "expedition": "", 
@@ -297,8 +298,10 @@ def load_and_merge_ships_data(catalog_data: Dict[str, Any], json_path: str = "sc
             
             specs = entry["ship"]["specification"]
             
+            # Nettoyage des clés de spécification
             specs_clean = {k.replace('_', ' ').title().replace('M/S/S', 'm/s²').replace('M/S', 'm/s').replace('Kg', 'kg').replace('M', 'm'): v for k, v in specs.items()}
             
+            # Retirer les champs d'équipage et cargo qui ne correspondent pas au format de BASE_CATALOG_DATA
             specs_clean.pop("Min Crew", None)
             specs_clean.pop("Max Crew", None)
             
@@ -324,9 +327,7 @@ def load_and_merge_ships_data(catalog_data: Dict[str, Any], json_path: str = "sc
             final_data.update(specs)
             match_count += 1
             
-        # --- RÈGLE D'AFFICHAGE DU PRIX aUEC ---
-        # Si le prix est 0, on remplace par la chaîne descriptive.
-        # Comme tous sont mis à ingame: True en Section 1, ils sont tous affichés.
+        # --- RÈGLE D'AFFICHAGE DU PRIX aUEC : 0 devient la chaîne ---
         if final_data.get("auec_price") == 0:
             final_data["auec_price"] = "Non achetable en jeu"
 

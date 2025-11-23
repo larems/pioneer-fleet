@@ -40,10 +40,17 @@ def normalize_db_schema(db: dict) -> dict:
         ship.setdefault("Visuel", "")
         ship.setdefault("Source", "STORE")
         ship.setdefault("Prix_USD", 0.0)
-        ship.setdefault("Prix_aUEC", 0.0)
+        
+        # Le prix aUEC peut être un nombre ou une chaîne ("Non achetable en jeu")
+        default_auec = 0 
+        if ship.get("Prix_aUEC") == "Non achetable en jeu":
+            default_auec = "Non achetable en jeu"
+            
+        ship.setdefault("Prix_aUEC", default_auec) 
+        
         ship.setdefault("Assurance", "Standard")
         ship.setdefault("Prix", None)
-        ship.setdefault("crew_max", 1) # Champ Crew Max par défaut
+        ship.setdefault("crew_max", 1) 
 
         # --- MIGRATION ANCIEN CHAMP "Prix" -> Prix_USD / Prix_aUEC ---
         legacy_price = ship.get("Prix", None)
@@ -62,8 +69,11 @@ def normalize_db_schema(db: dict) -> dict:
 
             if ship.get("Source") == "STORE" and float(ship.get("Prix_USD", 0) or 0) == 0:
                 ship["Prix_USD"] = legacy_price_clean
-            if ship.get("Source") == "INGAME" and float(ship.get("Prix_aUEC", 0) or 0) == 0:
-                ship["Prix_aUEC"] = legacy_price_clean
+            
+            # Ne pas écraser les chaînes descriptives
+            current_auec_price = ship.get("Prix_aUEC")
+            if ship.get("Source") == "INGAME" and isinstance(current_auec_price, (int, float)) and current_auec_price == 0:
+                 ship["Prix_aUEC"] = legacy_price_clean
     
     # Normalisation du user_data
     for pilot in db.get("users", {}).keys():
@@ -178,7 +188,16 @@ def add_ship_action():
     # *** VÉRIFICATION ANTI-DOUBLON SUPPRIMÉE POUR PERMETTRE X2, X3, etc. ***
 
     price_usd = info.get("price", 0.0)
-    price_aUEC = info.get("auec_price", 0.0)
+    
+    # Récupérer la valeur aUEC (peut être un nombre ou une chaîne)
+    price_aUEC_raw = info.get("auec_price", 0)
+    
+    # On stocke le prix aUEC en chaîne (si c'est une chaîne) ou en float (si c'est un nombre)
+    if isinstance(price_aUEC_raw, str):
+        price_aUEC = price_aUEC_raw
+    else:
+        price_aUEC = float(price_aUEC_raw or 0)
+
 
     new_entry = {
         "id": new_id,
@@ -191,7 +210,7 @@ def add_ship_action():
         "Visuel": "", # TRÈS IMPORTANT : Stocker vide pour ne pas dépasser 100KB
         "Source": source,
         "Prix_USD": float(price_usd or 0),
-        "Prix_aUEC": float(price_aUEC or 0),
+        "Prix_aUEC": price_aUEC, # Stockage de la valeur brute (numéro ou chaîne)
         "Assurance": insurance,
         "Prix": None, 
         "crew_max": info.get("crew_max", 1), 
@@ -231,10 +250,18 @@ def refresh_prices_from_catalog(source_type: str):
                 updated = True
 
         if source_type == "INGAME" and source == "INGAME":
-            new_price = float(info.get("auec_price", 0.0) or 0)
-            if float(ship.get("Prix_aUEC", 0) or 0) != new_price:
-                ship["Prix_aUEC"] = new_price
-                updated = True
+            new_price_raw = info.get("auec_price", 0)
+            
+            # Ne met à jour que si c'est un nombre valide ou une chaîne identique
+            if isinstance(new_price_raw, (int, float)) and new_price_raw > 0:
+                 if float(ship.get("Prix_aUEC", 0) or 0) != float(new_price_raw):
+                    ship["Prix_aUEC"] = float(new_price_raw)
+                    updated = True
+            elif isinstance(new_price_raw, str):
+                 if ship.get("Prix_aUEC") != new_price_raw:
+                    ship["Prix_aUEC"] = new_price_raw
+                    updated = True
+
 
     if updated:
         db = normalize_db_schema(db)
@@ -610,6 +637,8 @@ def catalogue_page():
 
     with col_filters:
         st.subheader("PARAMÈTRES")
+        
+        # Le filtre INGAME est maintenu, mais SHIPS_DB a été unifié pour inclure tous les vaisseaux
         purchase_source = st.radio("SOURCE DE POSSESSION", ["STORE", "INGAME"], captions=["(Achat USD)", "(Achat aUEC)"], index=0 if st.session_state.selected_source == "STORE" else 1, horizontal=False, key="purchase_source_radio")
         st.session_state.selected_source = purchase_source
         
@@ -624,7 +653,7 @@ def catalogue_page():
 
     filtered = {}
     for name, data in SHIPS_DB.items():
-        if purchase_source == "INGAME" and not data.get("ingame", False): continue
+        # Le filtre INGAME fonctionne maintenant car ships_data.py a forcé ingame: True pour tous.
         if brand_filter != "Tous" and data.get("brand") != brand_filter: continue
         if search_selection and name not in search_selection: continue
         filtered[name] = data
@@ -665,7 +694,16 @@ def catalogue_page():
                         price_display = f"${data.get('price', 0):,.2f} USD"
                         price_class = "usd-price"
                     else:
-                        price_display = f"{data.get('auec_price', 0):,.0f} aUEC"
+                        price_value = data.get('auec_price', 0)
+                        
+                        # CORRECTION CRITIQUE DU BUG D'AFFICHAGE DU PRIX AUEC
+                        if isinstance(price_value, (int, float)) and price_value > 0:
+                            price_display = f"{price_value:,.0f} aUEC" 
+                        elif isinstance(price_value, str):
+                            price_display = price_value
+                        else:
+                            price_display = "Prix non spécifié" # Sécurité
+                            
                         price_class = "auec-price"
                         
                     role = data.get("role", "Inconnu")
@@ -726,9 +764,45 @@ def catalogue_page():
             
             crew_max = info.get("crew_max", 1)
             st.markdown(f"**CREW MAX :** <span style='color:#FFF;'>{crew_max}</span>", unsafe_allow_html=True)
+            
+            # --- AFFICHAGE DES SPÉCIFICATIONS TECHNIQUES (Nouveaux champs du JSON) ---
+            st.markdown("---")
+            st.markdown("**SPÉCIFICATIONS TECHNIQUES**")
+            
+            specs_to_display = {
+                "Longueur": info.get("Length", "N/A"),
+                "Masse": info.get("Mass", "N/A"),
+                "Capacité Cargo (SCU)": info.get("Cargocapacity", "N/A"),
+                "Vitesse Max": info.get("Speed", "N/A"),
+            }
+            
+            for key, value in specs_to_display.items():
+                if value not in ("N/A", "-", " Kg", " Kg", " m/s"):
+                    # Formatage léger pour les nombres massifs (ex: 44,237,159.00 Kg)
+                    if key == "Masse" and isinstance(value, str) and value.replace('.', '', 1).isdigit():
+                        try:
+                            num_value = float(value.replace(' Kg', '').replace(' kg', '').replace(',', ''))
+                            formatted_value = f"{num_value:,.0f} kg"
+                        except ValueError:
+                            formatted_value = value
+                    else:
+                        formatted_value = value
+                        
+                    st.markdown(f"**{key} :** <span style='color:#FFF;'>{formatted_value}</span>", unsafe_allow_html=True)
 
-            price_value = f"${info.get('price', 0):,.0f} USD (Valeur)" if st.session_state.selected_source == "STORE" else f"{info.get('auec_price', 0):,.0f} aUEC (Coût)"
-            st.markdown(f"<h4 style='color:#30E8FF;'>ENREGISTREMENT : {price_value}</h4>", unsafe_allow_html=True)
+
+            # --- Affichage du Prix FINAL ---
+            price_value = data.get('auec_price', 0) if st.session_state.selected_source == "INGAME" else data.get('price', 0)
+            
+            if isinstance(price_value, str):
+                price_final_display = price_value
+            elif st.session_state.selected_source == "STORE":
+                price_final_display = f"${price_value:,.0f} USD (Valeur)"
+            else:
+                price_final_display = f"{price_value:,.0f} aUEC (Coût)"
+            
+            st.markdown(f"<h4 style='color:#30E8FF;'>ENREGISTREMENT : {price_final_display}</h4>", unsafe_allow_html=True)
+
 
             if st.session_state.current_pilot:
                 if st.button(f"✅ ENREGISTRER {selected_name} DANS MON HANGAR", type="primary", use_container_width=True):
@@ -785,9 +859,12 @@ def my_hangar_page():
             df_my["id"] = range(1, len(df_my) + 1)
         df_my["id"] = df_my["id"].astype(int)
 
-        # Conversion des colonnes de prix en numérique
+        # Conversion des colonnes de prix en numérique (pour les sommes)
         df_my["Prix_USD"] = pd.to_numeric(df_my["Prix_USD"], errors="coerce").fillna(0)
-        df_my["Prix_aUEC"] = pd.to_numeric(df_my["Prix_aUEC"], errors="coerce").fillna(0)
+        
+        # Le prix aUEC peut être un nombre ou une chaîne, on le normalise pour le calcul
+        df_my["Prix_aUEC_Num"] = df_my["Prix_aUEC"].apply(lambda x: float(x) if isinstance(x, (int, float)) else 0)
+
 
         # Correction : Forcer la Base64 des images locales pour l'aperçu du tableau
         df_my['Visuel'] = df_my['Image'].apply(get_local_img_as_base64)
@@ -798,8 +875,10 @@ def my_hangar_page():
         # 1. Calcul de la colonne de prix unique pour l'affichage
         df_my["Prix_Acquisition"] = df_my.apply(
             lambda row: (
-                f"{row['Prix_aUEC']:,.0f} aUEC"
-                if row["Source"] == "INGAME" and row["Prix_aUEC"] > 0
+                f"{row['Prix_aUEC_Num']:,.0f} aUEC"
+                if row["Source"] == "INGAME" and isinstance(row["Prix_aUEC"], (int, float)) and row['Prix_aUEC_Num'] > 0
+                else row['Prix_aUEC']
+                if row["Source"] == "INGAME" and isinstance(row["Prix_aUEC"], str)
                 else f"${row['Prix_USD']:,.0f} USD"
                 if row["Source"] == "STORE" and row["Prix_USD"] > 0
                 else "N/A"
@@ -831,17 +910,17 @@ def my_hangar_page():
             "Dispo": st.column_config.CheckboxColumn("OPÉRATIONNEL ?", width="small"),
             "Supprimer": st.column_config.CheckboxColumn("SUPPRIMER", width="small"),
             "Visuel": st.column_config.ImageColumn("APERÇU", width="small"),
-            "Source": st.column_config.TextColumn("SOURCE", width="small"), # Rendre Source visible
+            "Source": st.column_config.TextColumn("SOURCE", disabled=True, width="small"), # Rendre Source visible
             "Assurance": st.column_config.SelectboxColumn(
                 "ASSURANCE",
                 options=["LTI", "10 Ans", "6 Mois", "2 Mois", "Standard"],
                 width="medium",
             ),
             # Colonne Prix_Acquisition affichée comme texte pour garder le formatage monétaire unique
-            "Prix_Acquisition": st.column_config.TextColumn("PRIX", width="small"),
-            "Vaisseau": st.column_config.TextColumn("Vaisseau", width="medium"),
-            "Marque": st.column_config.TextColumn("Marque", width="small"),
-            "Rôle": st.column_config.TextColumn("Rôle", width="small"),
+            "Prix_Acquisition": st.column_config.TextColumn("PRIX", disabled=True, width="small"),
+            "Vaisseau": st.column_config.TextColumn("Vaisseau", disabled=True, width="medium"),
+            "Marque": st.column_config.TextColumn("Marque", disabled=True, width="small"),
+            "Rôle": st.column_config.TextColumn("Rôle", disabled=True, width="small"),
         }
         
         # Colonnes à désactiver dans l'éditeur (sauf les champs modifiables)
@@ -893,7 +972,7 @@ def my_hangar_page():
         st.markdown("## 💸 HANGAR INGAME (Acquisition aUEC)")
 
         if not df_ingame.empty:
-            total_aUEC = df_ingame["Prix_aUEC"].sum()
+            total_aUEC = df_ingame["Prix_aUEC_Num"].sum() # Utilise la colonne nettoyée
             col_aUEC, col_toggle_aUEC = st.columns([3, 1])
             show_aUEC = col_toggle_aUEC.toggle(
                 "Afficher Coût Total (aUEC)", value=False, key="toggle_aUEC"
@@ -944,7 +1023,7 @@ def render_acquisition_tracking(current_auec_balance, final_target_name):
     st.markdown("## 🎯 SUIVI D'ACQUISITION FUTURE (aUEC)")
     
     # Liste de tous les vaisseaux achetable en aUEC pour le sélecteur cible
-    ingame_ships = sorted([name for name, data in SHIPS_DB.items() if data.get('ingame', False)])
+    ingame_ships = sorted([name for name, data in SHIPS_DB.items() if data.get('auec_price') != "Non achetable en jeu"])
     ingame_options = ["— Sélectionner un objectif —"] + ingame_ships
     
     # Déterminer l'index par défaut pour le selectbox
@@ -1003,8 +1082,15 @@ def render_acquisition_tracking(current_auec_balance, final_target_name):
     # --- AFFICHAGE DE LA PROGRESSION (Calculé à partir des valeurs sauvegardées) ---
     if final_target_name and final_target_name in SHIPS_DB:
         target_info = SHIPS_DB[final_target_name]
-        cost_auec = float(target_info.get('auec_price', 0) or 0)
+        cost_auec_raw = target_info.get('auec_price', 0)
         
+        # S'assurer que le coût est un nombre pour le calcul (il ne devrait pas être une chaîne ici)
+        try:
+            cost_auec = float(cost_auec_raw)
+        except (ValueError, TypeError):
+            cost_auec = 0 
+
+
         if cost_auec > 0:
             st.markdown("---")
             st.markdown("#### PROCHAIN OBJECTIF : **" + final_target_name + "**")
@@ -1033,7 +1119,7 @@ def render_acquisition_tracking(current_auec_balance, final_target_name):
                 remaining = cost_auec - current_auec_balance
                 st.warning(f"Il vous manque **{remaining:,.0f} aUEC** pour l'acquisition.")
         else:
-            st.info("Le vaisseau cible sélectionné n'a pas de prix en aUEC dans le catalogue.")
+            st.info("Le vaisseau cible sélectionné n'est pas disponible à l'achat en jeu (prix inconnu ou à 0).")
     # --- FIN AFFICHAGE PROGRESSION ---
 
 
@@ -1058,9 +1144,9 @@ def corpo_fleet_page():
     df_global["Prix_USD"] = pd.to_numeric(df_global["Prix_USD"], errors="coerce").fillna(
         0
     )
-    df_global["Prix_aUEC"] = pd.to_numeric(
-        df_global["Prix_aUEC"], errors="coerce"
-    ).fillna(0)
+    # Utilisation de la colonne numérique pour les calculs globaux
+    df_global["Prix_aUEC_Num"] = df_global["Prix_aUEC"].apply(lambda x: float(x) if isinstance(x, (int, float)) else 0)
+
 
     # Joindre le Crew Max à partir de SHIPS_DB (pour les totaux et graphiques)
     def get_ship_info(row, key):
@@ -1075,7 +1161,7 @@ def corpo_fleet_page():
     total_pilots = len(st.session_state.db["users"])
 
     total_value_usd = df_global[df_global["Source"] == "STORE"]["Prix_USD"].sum()
-    total_value_aUEC = df_global[df_global["Source"] == "INGAME"]["Prix_aUEC"].sum()
+    total_value_aUEC = df_global[df_global["Source"] == "INGAME"]["Prix_aUEC_Num"].sum()
 
     st.markdown("---")
 
@@ -1249,7 +1335,11 @@ def corpo_fleet_page():
         if source == 'STORE':
             return f"${info.get('price', 0):,.0f} USD"
         else:
-            return f"{info.get('auec_price', 0):,.0f} aUEC"
+            price_value = info.get('auec_price', 0)
+            if isinstance(price_value, str):
+                return price_value
+            else:
+                return f"{price_value:,.0f} aUEC"
 
 
     display_for_table['Prix'] = display_for_table.apply(calculate_aggregated_price, axis=1)
@@ -1274,15 +1364,3 @@ def corpo_fleet_page():
         selection_mode="disabled", 
         key="global_fleet_detail",
     )
-
-
-# --- MAIN ---
-render_sidebar()
-
-if not st.session_state.current_pilot:
-    home_page()
-else:
-    st.markdown("<h1>PIONEER COMMAND | CONSOLE D'OPÉRATIONS</h1>", unsafe_allow_html=True)
-    if st.session_state.menu_nav == "CATALOGUE": catalogue_page()
-    elif st.session_state.menu_nav == "MON HANGAR": my_hangar_page()
-    elif st.session_state.menu_nav == "FLOTTE CORPO": corpo_fleet_page()
