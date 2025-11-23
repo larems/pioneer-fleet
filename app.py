@@ -1000,7 +1000,7 @@ def my_hangar_page():
             "Source": st.column_config.TextColumn("SOURCE", width="small"), # Rendre Source visible
             "Assurance": st.column_config.SelectboxColumn(
                 "ASSURANCE",
-                options=["LTI", "10 Ans", "2 ans", "6 Mois", "2 Mois""Standard"]
+                options=["LTI", "10 Ans", "2 ans", "6 Mois", "2 Mois","Standard"]
                 width="medium",
             ),
             # Colonne Prix_Acquisition affichée comme texte pour garder le formatage monétaire unique
