@@ -901,6 +901,7 @@ def my_hangar_page():
     df_store_display = df_store.drop(columns=columns_to_drop, errors="ignore")
     
     # Configuration spécifique pour le Store: USD actif (vert)
+    # >>> CORRECTION CRITIQUE : RETRAIT DU LAMBDA POUR EVITER LE TYPERROR <<<
     editable_columns_store = {
         "Dispo": st.column_config.CheckboxColumn("OPÉRATIONNEL ?", width="small"),
         "Supprimer": st.column_config.CheckboxColumn("SUPPRIMER", width="small"),
@@ -910,13 +911,10 @@ def my_hangar_page():
             options=["LTI", "10 Ans", "6 Mois", "2 Mois", "Standard"],
             width="medium",
         ),
-        # On utilise le formatage de couleur natif et stable de Streamlit (gris si 0)
         "Prix_USD": st.column_config.NumberColumn(
             "VALEUR USD", 
             format="$%,.0f", 
             help="Valeur en dollars réels.",
-            # Utilisation de la fonction lambda compatible pour la couleur
-            text_color=lambda x: "#00ff00" if x > 0 else "#666666" 
         ),
         "Prix_aUEC": st.column_config.NumberColumn(
             "COÛT aUEC", 
@@ -936,7 +934,9 @@ def my_hangar_page():
             "VALORISATION STORE", f"${total_usd:,.0f}" if show_usd else "---"
         )
         
-        # Le CSS pour la couleur USD a été réactivé dans le dict de config pour la stabilité
+        # Ajout d'un petit espace pour séparer visuellement la métrique du tableau
+        st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) 
+
         edited_store_display = st.data_editor(
             df_store_display,
             column_config=editable_columns_store,
@@ -966,6 +966,7 @@ def my_hangar_page():
     df_ingame_display = df_ingame.drop(columns=columns_to_drop, errors="ignore")
     
     # Configuration spécifique pour Ingame: aUEC actif (turquoise)
+    # >>> CORRECTION CRITIQUE : RETRAIT DU LAMBDA POUR EVITER LE TYPERROR <<<
     editable_columns_ingame = {
         "Dispo": st.column_config.CheckboxColumn("OPÉRATIONNEL ?", width="small"),
         "Supprimer": st.column_config.CheckboxColumn("SUPPRIMER", width="small"),
@@ -979,12 +980,10 @@ def my_hangar_page():
             "VALEUR USD", 
             format="$%,.0f", 
         ),
-        # CORRECTION AFFICHER PRIX AUEC EN TURQUOISE (COLONNE ACTIVE)
         "Prix_aUEC": st.column_config.NumberColumn(
             "COÛT aUEC", 
             format="%,.0f",
             help="Coût en aUEC pour l'achat en jeu.",
-            text_color=lambda x: "#30e8ff" if x > 0 else "#666666" # Turquoise
         ),
     }
 
@@ -1001,6 +1000,8 @@ def my_hangar_page():
             "COÛT ACQUISITION", f"{total_aUEC:,.0f} aUEC" if show_aUEC else "---"
         )
         
+        st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) 
+
         edited_ingame_display = st.data_editor(
             df_ingame_display,
             column_config=editable_columns_ingame,
