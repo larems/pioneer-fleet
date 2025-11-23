@@ -16,7 +16,7 @@ st.set_page_config(
 BACKGROUND_IMAGE = "assets/fondecransite.png"
 
 # --- 2. GESTION DATABASE (JSONBIN.IO) ---
-JSONBIN_ID = st.secrets.get("JSONBIN_ID", "6921f0ded0ea881f40f9933f") # Remplacer par votre ID si différent
+JSONBIN_ID = st.secrets.get("JSONBIN_ID", "6921f0ded0ea881f40f9933f")
 JSONBIN_KEY = st.secrets.get("JSONBIN_KEY", "")
 
 
@@ -924,17 +924,13 @@ def my_hangar_page():
     """Affiche et permet la modification de la flotte personnelle, séparée par source."""
     st.subheader(f"HANGAR LOGISTIQUE | PILOTE: {st.session_state.current_pilot}")
     st.markdown("---")
-    
-    # --- DÉBUT LOGIQUE D'ACQUISITION FUTURE (DÉPLACÉE EN BAS) ---
+
+    # --- LECTURE DES VARIABLES NÉCESSAIRES EN DÉBUT DE FONCTION (CORRECTION DU NAMERROR) ---
     pilot_data = st.session_state.db.get("user_data", {}).get(st.session_state.current_pilot, {})
     current_auec_balance = pilot_data.get("auec_balance", 0)
-    target_ship_name = pilot_data.get("acquisition_target", None)
+    final_target_name = pilot_data.get("acquisition_target", None)
     
-    # Stocker les valeurs actuelles pour les comparer aux entrées du formulaire
-    st.session_state['initial_auec_balance'] = current_auec_balance
-    st.session_state['initial_target_name'] = target_ship_name
-    
-    # --- LISTE DES VAISSEAUX POSSÉDÉS (Affichée en premier) ---
+    # --- LISTE DES VAISSEAUX POSSÉDÉS (Première section) ---
     my_fleet = [
         s
         for s in st.session_state.db["fleet"]
@@ -1110,55 +1106,59 @@ def my_hangar_page():
 
 
     # -------------------------------------------------------------
-    # --- ZONE : SUIVI D'ACQUISITION FUTURE (Déplacée en bas) ---
+    # --- ZONE : SUIVI D'ACQUISITION FUTURE (DÉPLACÉE EN BAS) ---
     # -------------------------------------------------------------
+    st.markdown("---") # Séparateur visuel
     st.markdown("## 🎯 SUIVI D'ACQUISITION FUTURE (aUEC)")
     
-    col_input, col_selector = st.columns([1, 2])
-    
-    with col_input:
-        new_auec_balance = st.number_input(
-            "💰 **MON SOLDE aUEC ACTUEL**",
-            min_value=0,
-            value=int(current_auec_balance),
-            step=1000,
-            key="hangar_auec_input_form", # Clé différente pour éviter les conflits
-            help="Entrez votre solde actuel pour suivre votre progression d'achat."
-        )
-
     # Liste de tous les vaisseaux achetable en aUEC pour le sélecteur cible
     ingame_ships = sorted([name for name, data in SHIPS_DB.items() if data.get('ingame', False)])
     ingame_options = ["— Sélectionner un objectif —"] + ingame_ships
     
     # Déterminer l'index par défaut pour le selectbox
-    current_target_index = ingame_options.index(target_ship_name) if target_ship_name in ingame_options else 0
+    current_target_index = ingame_options.index(final_target_name) if final_target_name in ingame_options else 0
     
-    with col_selector:
-        selected_target = st.selectbox(
-            "🚀 **VAISSEAU CIBLE EN JEU**",
-            ingame_options,
-            index=current_target_index,
-            key="hangar_target_select_form",
-        )
-        
-    col_save, col_delete = st.columns([1, 1])
     
-    # Logique de Sauvegarde (Sauvegarder explicitement l'objectif/solde)
-    if col_save.button("💾 ENREGISTRER MON SOLDE / OBJECTIF", type="primary", use_container_width=True):
-        new_target = st.session_state.hangar_target_select_form if st.session_state.hangar_target_select_form != "— Sélectionner un objectif —" else None
+    with st.form("acquisition_target_form"):
+        col_input, col_selector = st.columns([1, 2])
         
-        st.session_state.db["user_data"].setdefault(st.session_state.current_pilot, {})
-        user_data_update = st.session_state.db["user_data"][st.session_state.current_pilot]
-        
-        user_data_update["auec_balance"] = st.session_state.hangar_auec_input_form
-        user_data_update["acquisition_target"] = new_target
-        
-        if save_db_to_cloud(st.session_state.db):
-            st.toast("✅ Solde et objectif d'acquisition enregistrés !", icon="🎯")
-            st.rerun()
+        with col_input:
+            new_auec_balance = st.number_input(
+                "💰 **MON SOLDE aUEC ACTUEL**",
+                min_value=0,
+                value=int(current_auec_balance),
+                step=1000,
+                key="hangar_auec_input_form",
+                help="Entrez votre solde actuel pour suivre votre progression d'achat."
+            )
 
-    # Logique de Suppression d'Objectif
-    if col_delete.button("🗑️ SUPPRIMER L'OBJECTIF", use_container_width=True):
+        with col_selector:
+            selected_target = st.selectbox(
+                "🚀 **VAISSEAU CIBLE EN JEU**",
+                ingame_options,
+                index=current_target_index,
+                key="hangar_target_select_form",
+            )
+            
+        col_save, col_delete = st.columns([1, 1])
+        
+        submitted = st.form_submit_button("💾 ENREGISTRER MON SOLDE / OBJECTIF", type="primary")
+
+        if submitted:
+            new_target = st.session_state.hangar_target_select_form if st.session_state.hangar_target_select_form != "— Sélectionner un objectif —" else None
+            
+            st.session_state.db["user_data"].setdefault(st.session_state.current_pilot, {})
+            user_data_update = st.session_state.db["user_data"][st.session_state.current_pilot]
+            
+            user_data_update["auec_balance"] = st.session_state.hangar_auec_input_form
+            user_data_update["acquisition_target"] = new_target
+            
+            if save_db_to_cloud(st.session_state.db):
+                st.toast("✅ Solde et objectif d'acquisition enregistrés !", icon="🎯")
+                st.rerun()
+
+    # Logique de Suppression d'Objectif (hors du formulaire pour pouvoir rerun)
+    if final_target_name and st.button("🗑️ SUPPRIMER L'OBJECTIF ACTUEL", use_container_width=True):
         st.session_state.db["user_data"].setdefault(st.session_state.current_pilot, {})
         user_data_update = st.session_state.db["user_data"][st.session_state.current_pilot]
         
@@ -1167,7 +1167,7 @@ def my_hangar_page():
         if save_db_to_cloud(st.session_state.db):
             st.toast("🗑️ Objectif d'acquisition supprimé.", icon="❌")
             st.rerun()
-
+            
     
     # --- AFFICHAGE DE LA PROGRESSION (Calculé à partir des valeurs sauvegardées) ---
     if final_target_name and final_target_name in SHIPS_DB:
@@ -1178,7 +1178,7 @@ def my_hangar_page():
             st.markdown("---")
             st.markdown("#### PROCHAIN OBJECTIF : **" + final_target_name + "**")
             
-            progress_ratio = min(1.0, final_auec_balance / cost_auec)
+            progress_ratio = min(1.0, current_auec_balance / cost_auec)
             progress_percent = int(progress_ratio * 100)
             
             col_metric_1, col_metric_2 = st.columns(2)
@@ -1189,17 +1189,17 @@ def my_hangar_page():
             )
             col_metric_2.metric(
                 "PROGRESSION", 
-                f"{final_auec_balance:,.0f} aUEC", 
+                f"{current_auec_balance:,.0f} aUEC", 
                 delta=f"{progress_percent}%", 
                 delta_color="normal" if progress_percent < 100 else "inverse"
             )
 
-            st.progress(progress_ratio, text=f"**{final_auec_balance:,.0f} aUEC / {cost_auec:,.0f} aUEC**")
+            st.progress(progress_ratio, text=f"**{current_auec_balance:,.0f} aUEC / {cost_auec:,.0f} aUEC**")
             
             if progress_percent >= 100:
                 st.success("Fonds suffisants ! Vous pouvez acheter votre vaisseau. 🚀")
             else:
-                remaining = cost_auec - final_auec_balance
+                remaining = cost_auec - current_auec_balance
                 st.warning(f"Il vous manque **{remaining:,.0f} aUEC** pour l'acquisition.")
         else:
             st.info("Le vaisseau cible sélectionné n'a pas de prix en aUEC dans le catalogue.")
