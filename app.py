@@ -72,7 +72,7 @@ def normalize_db_schema(db: dict) -> dict:
     return db
 
 
-@st.cache_data(ttl=300, show_spinner="Chargement de la base de données...")
+@st.cache_data(show_spinner=False)
 def load_db_from_cloud():
     """Charge la base de données depuis JSONBin.io."""
     if not JSONBIN_KEY:
@@ -141,11 +141,8 @@ def get_local_img_as_base64(path):
             return f"data:{mime_type};base64,{encoded}"
         except Exception:
             pass
-    # fallback (le SVG est correct, il est juste long)
-    return (
-        "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDov"
-        "L3d3dy53My5vcmcvMjAwMC9zdmciIHwp"
-    )
+    # FIX: Remplacer le SVG potentiellement invalide par une chaîne vide pour éviter les crashs précoces
+    return "" 
 
 
 def select_ship(ship_name, source, insurance):
@@ -174,7 +171,6 @@ def add_ship_action():
     new_id = int(time.time() * 1_000_000) 
 
     # *** VÉRIFICATION ANTI-DOUBLON SUPPRIMÉE POUR PERMETTRE X2, X3, etc. ***
-    # Si l'utilisateur veut 10x le même vaisseau, il clique 10 fois.
 
     img_b64 = get_local_img_as_base64(info.get("img", ""))
     price_usd = info.get("price", 0.0)
@@ -1076,7 +1072,7 @@ def my_hangar_page():
                 "Afficher Coût Total (aUEC)", value=False, key="toggle_aUEC"
             )
             col_aUEC.metric(
-                "COÛT ACQUISITION", f"{total_aUEC:,.0f} aUEC" if show_aUEC else "---"
+                "COÛT ACQUISITION", f"{total_aUEC:,.0f} aUEC" if show_auec else "---"
             )
             
             st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) 
@@ -1356,7 +1352,7 @@ def corpo_fleet_page():
                 max_value=int(summary_df["Quantité"].max()),
             ),
             "Dispo": st.column_config.NumberColumn("Prêtables"),
-            "Crew_Max": st.column_config.NumberColumn("CREW MAX"), 
+            "Crew_Max": st.column_config.NumberColumn("CREW MAX", format="%d"), 
         },
         use_container_width=True,
         hide_index=True,
