@@ -27,6 +27,8 @@ def normalize_db_schema(db: dict) -> dict:
     """
     db.setdefault("users", {})
     db.setdefault("fleet", [])
+    # NOUVEAU: Ajout d'une section pour les données spécifiques à l'utilisateur (comme le solde aUEC)
+    db.setdefault("user_data", {}) 
 
     for i, ship in enumerate(db["fleet"]):
         ship.setdefault("id", int(time.time() * 1_000_000) + i)
@@ -62,6 +64,9 @@ def normalize_db_schema(db: dict) -> dict:
                 ship["Prix_USD"] = legacy_price_clean
             if ship.get("Source") == "INGAME" and float(ship.get("Prix_aUEC", 0) or 0) == 0:
                 ship["Prix_aUEC"] = legacy_price_clean
+        
+        # S'assurer que le champ 'Prix' (l'ancien champ) est présent si ce n'est pas le cas pour ne pas planter
+        ship.setdefault("Prix", None)
 
     return db
 
@@ -205,6 +210,7 @@ def add_ship_action():
         "Prix_USD": float(price_usd or 0),
         "Prix_aUEC": float(price_aUEC or 0),
         "Assurance": insurance,
+        "Prix": None, # S'assurer que l'ancienne colonne est None
     }
 
     st.session_state.db["fleet"].append(new_entry)
@@ -314,7 +320,7 @@ bg_img_code = get_local_img_as_base64(BACKGROUND_IMAGE)
 st.markdown(
     f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght&display=swap');
 
 /* FOND GLOBAL */
 .stApp {{
@@ -837,6 +843,31 @@ def catalogue_page():
 
         selected_name = st.session_state.selected_ship_name
 
+        if st.session_state.current_pilot:
+            # Récupérer les données utilisateur (y compris le solde aUEC)
+            pilot_data = st.session_state.db.get("user_data", {}).get(st.session_state.current_pilot, {})
+            current_auec_balance = pilot_data.get("auec_balance", 0)
+            
+            # --- CHAMP D'ENTRÉE DU SOLDE AUEC ---
+            new_auec_balance = st.number_input(
+                "💰 **MON SOLDE aUEC ACTUEL**",
+                min_value=0,
+                value=int(current_auec_balance),
+                step=1000,
+                help="Entrez votre solde actuel pour suivre votre progression d'achat en jeu."
+            )
+            
+            # Action de mise à jour du solde
+            if new_auec_balance != current_auec_balance:
+                st.session_state.db["user_data"].setdefault(st.session_state.current_pilot, {})
+                st.session_state.db["user_data"][st.session_state.current_pilot]["auec_balance"] = new_auec_balance
+                if save_db_to_cloud(st.session_state.db):
+                    st.toast("✅ Solde aUEC mis à jour et sauvegardé.", icon="💰")
+                    st.rerun()
+
+            st.markdown("---")
+
+
         if selected_name and selected_name in SHIPS_DB:
             info = SHIPS_DB[selected_name]
 
@@ -863,6 +894,36 @@ def catalogue_page():
                 f"**ASSURANCE :** <span style='color:#FFF;'>{st.session_state.selected_insurance}</span>",
                 unsafe_allow_html=True,
             )
+
+            # --- NOUVEAU : SUIVI DE L'OBJECTIF AUEC ---
+            if st.session_state.current_pilot and st.session_state.selected_source == "INGAME":
+                cost_auec = float(info.get('auec_price', 0) or 0)
+                
+                if cost_auec > 0 and current_auec_balance >= 0: # on garde la vérif >= 0 pour afficher l'objectif
+                    st.markdown("#### OBJECTIF D'ACQUISITION (aUEC)")
+                    
+                    progress_ratio = min(1.0, current_auec_balance / cost_auec)
+                    progress_percent = int(progress_ratio * 100)
+                    
+                    st.metric(
+                        "COÛT CIBLE", 
+                        f"{cost_auec:,.0f} aUEC", 
+                        delta=f"Progression : {progress_percent}%", 
+                        delta_color="normal" if progress_percent < 100 else "inverse"
+                    )
+
+                    st.progress(progress_ratio, text=f"**{current_auec_balance:,.0f} aUEC / {cost_auec:,.0f} aUEC**")
+                    
+                    if progress_percent >= 100:
+                        st.success("Fonds suffisants pour l'acquisition ! 🚀")
+                    else:
+                        remaining = cost_auec - current_auec_balance
+                        st.info(f"Il vous manque **{remaining:,.0f} aUEC** pour atteindre l'objectif.")
+                elif cost_auec > 0:
+                    st.info(f"Entrez votre solde aUEC pour suivre l'objectif de {cost_auec:,.0f} aUEC.")
+                
+                st.markdown("---") # Séparateur après la section d'objectif
+            # --- FIN SUIVI OBJECTIF ---
 
             if st.session_state.selected_source == "STORE":
                 price_value = f"${info.get('price', 0):,.0f} USD (Valeur)"
@@ -1286,7 +1347,7 @@ def corpo_fleet_page():
             "id": None,
             "Marque": None,
             "Dispo": None,
-            "Prix": None, # <--- CORRECTION: Masquer la colonne "Prix" redondante
+            "Prix": None, # Masquer la colonne "Prix" redondante
         },
         use_container_width=True,
         hide_index=True,
