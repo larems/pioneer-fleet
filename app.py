@@ -5,6 +5,7 @@ import base64
 import os
 import requests
 import time
+# Assurez-vous que ships_data.py est dans le même dossier
 from ships_data import SHIPS_DB
 
 # --- 1. CONFIGURATION ---
@@ -38,6 +39,7 @@ def normalize_db_schema(db: dict) -> dict:
         ship.setdefault("Image", "")
         ship.setdefault("Visuel", "")
         ship.setdefault("Source", "STORE")
+        # S'assurer que les prix sont stockés comme des nombres (même si JSONBin les lit parfois comme str)
         ship.setdefault("Prix_USD", 0.0)
         ship.setdefault("Prix_aUEC", 0.0)
         ship.setdefault("Assurance", "Standard")
@@ -862,6 +864,10 @@ def my_hangar_page():
         df_my["id"] = range(1, len(df_my) + 1)
     df_my["id"] = df_my["id"].astype(int)
 
+    # CORRECTION DES PRIX: Assurer la conversion des colonnes en numérique pour les calculs de totaux
+    df_my["Prix_USD"] = pd.to_numeric(df_my["Prix_USD"], errors="coerce").fillna(0)
+    df_my["Prix_aUEC"] = pd.to_numeric(df_my["Prix_aUEC"], errors="coerce").fillna(0)
+
     editable_columns = {
         "Dispo": st.column_config.CheckboxColumn("OPÉRATIONNEL ?", width="small"),
         "Supprimer": st.column_config.CheckboxColumn("SUPPRIMER", width="small"),
@@ -891,7 +897,8 @@ def my_hangar_page():
     st.markdown("## 💰 HANGAR STORE (Propriété USD)")
 
     if not df_store.empty:
-        total_usd = pd.to_numeric(df_store["Prix_USD"], errors="coerce").fillna(0).sum()
+        # Les prix sont déjà numériques grâce à la correction ci-dessus
+        total_usd = df_store["Prix_USD"].sum()
         col_usd, col_toggle_usd = st.columns([3, 1])
         show_usd = col_toggle_usd.toggle(
             "Afficher Valorisation Totale (USD)", value=False, key="toggle_usd"
@@ -931,9 +938,8 @@ def my_hangar_page():
     st.markdown("## 💸 HANGAR INGAME (Acquisition aUEC)")
 
     if not df_ingame.empty:
-        total_aUEC = (
-            pd.to_numeric(df_ingame["Prix_aUEC"], errors="coerce").fillna(0).sum()
-        )
+        # Les prix sont déjà numériques grâce à la correction ci-dessus
+        total_aUEC = df_ingame["Prix_aUEC"].sum()
         col_aUEC, col_toggle_aUEC = st.columns([3, 1])
         show_aUEC = col_toggle_aUEC.toggle(
             "Afficher Coût Total (aUEC)", value=False, key="toggle_aUEC"
@@ -997,25 +1003,17 @@ def corpo_fleet_page():
     )["fleet"]
     df_global = pd.DataFrame(df_global_norm)
 
+    # CORRECTION DES PRIX: Assurer la conversion des colonnes en numérique au début
+    df_global["Prix_USD"] = pd.to_numeric(df_global["Prix_USD"], errors="coerce").fillna(0)
+    df_global["Prix_aUEC"] = pd.to_numeric(df_global["Prix_aUEC"], errors="coerce").fillna(0)
+    
     # KPI principaux
     total_ships = len(df_global)
     total_dispo = int(df_global["Dispo"].sum())
     total_pilots = len(st.session_state.db["users"])
 
-    total_value_usd = (
-        pd.to_numeric(
-            df_global[df_global["Source"] == "STORE"]["Prix_USD"], errors="coerce"
-        )
-        .fillna(0)
-        .sum()
-    )
-    total_value_aUEC = (
-        pd.to_numeric(
-            df_global[df_global["Source"] == "INGAME"]["Prix_aUEC"], errors="coerce"
-        )
-        .fillna(0)
-        .sum()
-    )
+    total_value_usd = df_global[df_global["Source"] == "STORE"]["Prix_USD"].sum()
+    total_value_aUEC = df_global[df_global["Source"] == "INGAME"]["Prix_aUEC"].sum()
 
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("PILOTES", total_pilots)
@@ -1161,8 +1159,12 @@ def corpo_fleet_page():
     # VUE TACTIQUE (Logique corrigée et SÉCURISÉE)
     # On utilise .get() avec des valeurs par défaut pour éviter tout KeyError/TypeError
     # si la structure de sélection est incomplète ou si aucune ligne n'est cliquée.
-    selected_indices = selection.get("selection", {}).get("rows", [])
-    
+    try:
+        selection_data = selection.get("selection", {})
+        selected_indices = selection_data.get("rows", [])
+    except Exception:
+        selected_indices = []
+
     if selected_indices:
         idx = selected_indices[0]
         selected_row = display_df.iloc[idx]
@@ -1184,8 +1186,9 @@ def corpo_fleet_page():
                 st.warning("Visuel non disponible localement.")
 
         # Prix propres : on masque les 0 / valeurs vides
-        prix_usd = float(selected_row.get("Prix_USD") or 0)
-        prix_aUEC = float(selected_row.get("Prix_aUEC") or 0)
+        # Ces valeurs sont garanties être des floats grâce à la correction faite plus haut
+        prix_usd = selected_row.get("Prix_USD", 0.0)
+        prix_aUEC = selected_row.get("Prix_aUEC", 0.0)
 
         prix_usd_format = (
             f"${prix_usd:,.0f}" if prix_usd > 0 and selected_row["Source"] == "STORE" else "N/A"
