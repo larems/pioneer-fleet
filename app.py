@@ -72,12 +72,12 @@ def normalize_db_schema(db: dict) -> dict:
     return db
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(ttl=300, show_spinner="Chargement de la base de données...")
 def load_db_from_cloud():
     """Charge la base de données depuis JSONBin.io."""
     if not JSONBIN_KEY:
         st.warning(
-            "⚠️ Clé JSONBin.io (MASTER_KEY) manquante. Utilisation d'une base de données locale temporaire."
+            "⚠️ Clé JSONBIN.io (MASTER_KEY) manquante. Utilisation d'une base de données locale temporaire."
         )
         return {"users": {}, "fleet": []}
 
@@ -116,7 +116,7 @@ def save_db_to_cloud(data):
             st.warning("⚠️ Limite de 100KB JSONBin atteinte. Sauvegarde des données minimales seulement.")
             return True 
     except requests.exceptions.RequestException as e:
-        st.error(f"Erreur réseau/timeout lors du sauvegarde: {e}")
+        st.error(f"Erreur réseau/timeout lors de la sauvegarde: {e}")
         return False
 
     # Clear cache de la fonction de chargement
@@ -529,6 +529,7 @@ def render_sidebar():
 
             if st.button("DÉCONNEXION", use_container_width=True):
                 st.session_state.current_pilot = None
+                st.session_state.session_log = []
                 st.session_state.menu_nav = "CATALOGUE"
                 st.rerun()
 
@@ -729,11 +730,21 @@ def catalogue_page():
         else:
             if st.session_state.current_pilot:
                 st.info("Sélectionnez un vaisseau dans le registre pour afficher les options d'enregistrement.")
+            else:
+                st.info("Connectez-vous pour enregistrer un vaisseau.")
+
+            st.markdown("---")
+            st.caption("Instructions:")
+            st.markdown("* Choisissez la source et l'assurance à gauche.")
+            st.markdown("* Cliquez sur le bouton sous la carte pour le sélectionner.")
+            if st.session_state.current_pilot:
+                st.markdown("* Confirmez l'enregistrement ici.")
 
 
 def my_hangar_page():
     st.subheader(f"HANGAR LOGISTIQUE | PILOTE: {st.session_state.current_pilot}")
-    
+    st.markdown("---")
+
     pilot_data = st.session_state.db.get("user_data", {}).get(st.session_state.current_pilot, {})
     current_auec_balance = pilot_data.get("auec_balance", 0)
     final_target_name = pilot_data.get("acquisition_target", None)
@@ -747,14 +758,19 @@ def my_hangar_page():
     else:
         df_my = pd.DataFrame(my_fleet)
         df_my["Supprimer"] = False
+
+        if "Source" not in df_my.columns:
+            st.error("Données de flotte incomplètes.")
+            render_acquisition_tracking(current_auec_balance, final_target_name)
+            return
+
         df_my["id"] = df_my["id"].astype(int)
         df_my["Prix_USD"] = pd.to_numeric(df_my["Prix_USD"], errors="coerce").fillna(0)
         df_my["Prix_aUEC"] = pd.to_numeric(df_my["Prix_aUEC"], errors="coerce").fillna(0)
         
-        # Correction : Forcer la Base64 des images locales pour l'aperçu du tableau
+        # Régénération de la Base64 pour l'aperçu du tableau
         df_my['Visuel'] = df_my['Image'].apply(get_local_img_as_base64)
         
-        # Remplacement de l'ancien champ Prix
         df_my["Prix_Acquisition"] = df_my.apply(lambda row: f"{row['Prix_aUEC']:,.0f} aUEC" if row["Source"] == "INGAME" and row["Prix_aUEC"] > 0 else f"${row['Prix_USD']:,.0f} USD" if row["Source"] == "STORE" and row["Prix_USD"] > 0 else "N/A", axis=1)
 
         columns_for_display = ["id", "Vaisseau", "Marque", "Rôle", "Dispo", "Visuel", "Source", "Assurance", "Prix_Acquisition", "Supprimer"]
@@ -774,15 +790,60 @@ def my_hangar_page():
         
         disabled_cols = ["Vaisseau", "Marque", "Rôle", "Visuel", "Source", "Prix_Acquisition"]
         
-        # --- HANGAR STORE & INGAME (Affichage) ---
+        # --- HANGAR STORE ---
+        df_store = df_my[df_my["Source"] == "STORE"].reset_index(drop=True).copy()
+        df_store_display = df_store[columns_for_display].copy()
+
+        st.markdown("## 💰 HANGAR STORE (Propriété USD)")
+
+        if not df_store.empty:
+            total_usd = df_store["Prix_USD"].sum()
+            col_usd, col_toggle_usd = st.columns([3, 1])
+            show_usd = col_toggle_usd.toggle("Afficher Valorisation Totale (USD)", value=False, key="toggle_usd")
+            col_usd.metric("VALORISATION STORE", f"${total_usd:,.0f}" if show_usd else "---")
+            
+            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) 
+
+            edited_store = st.data_editor(df_store_display, column_config=editable_columns_base, disabled=disabled_cols, hide_index=True, use_container_width=True, key="store_hangar_editor")
+        else:
+            st.info("Aucun vaisseau provenant du Store dans votre hangar.")
+            edited_store = pd.DataFrame(columns=columns_for_display)
+
+        st.markdown("---")
+
+        # --- HANGAR INGAME ---
+        df_ingame = df_my[df_my["Source"] == "INGAME"].reset_index(drop=True).copy()
+        df_ingame_display = df_ingame[columns_for_display].copy()
         
-        # NOTE: La fusion des DataFrames édités pour la sauvegarde est maintenant gérée à la fin de la fonction.
+        st.markdown("## 💸 HANGAR INGAME (Acquisition aUEC)")
+
+        if not df_ingame.empty:
+            total_aUEC = df_ingame["Prix_aUEC"].sum()
+            col_aUEC, col_toggle_aUEC = st.columns([3, 1])
+            show_aUEC = col_toggle_aUEC.toggle("Afficher Coût Total (aUEC)", value=False, key="toggle_aUEC")
+            col_aUEC.metric("COÛT ACQUISITION", f"{total_aUEC:,.0f} aUEC" if show_aUEC else "---")
+            
+            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) 
+
+            edited_ingame = st.data_editor(df_ingame_display, column_config=editable_columns_base, disabled=disabled_cols, hide_index=True, use_container_width=True, key="ingame_hangar_editor")
+        else:
+            st.info("Aucun vaisseau acheté en jeu dans votre hangar.")
+            edited_ingame = pd.DataFrame(columns=columns_for_display)
+
+        # --- SAUVEGARDE GLOBALE DES VAISSEAUX POSSÉDÉS ---
+        st.markdown("---")
+        combined_edited = pd.concat([edited_store, edited_ingame], ignore_index=True)
+
+        if st.button("💾 ACTUALISER LA FLOTTE (SAUVEGARDER & SUPPRIMER)", type="primary", use_container_width=True):
+            if not combined_edited.empty:
+                process_fleet_updates(combined_edited)
+            else:
+                st.info("Aucune modification significative à enregistrer.")
 
     render_acquisition_tracking(current_auec_balance, final_target_name)
 
 
 def render_acquisition_tracking(current_auec_balance, final_target_name):
-    # Reste du code de suivi d'acquisition inchangé
     st.markdown("---")
     st.markdown("## 🎯 SUIVI D'ACQUISITION FUTURE (aUEC)")
     
@@ -862,26 +923,29 @@ def corpo_fleet_page():
 
     df_global = pd.DataFrame(st.session_state.db["fleet"])
 
-    # Normalization and price/crew merging for metrics and display
+    # Normalisation des prix et Crew Max
     def get_ship_info(row, key):
         return SHIPS_DB.get(row['Vaisseau'], {}).get(key, row.get(key, 1))
         
     df_global['Crew_Max_Catalog'] = df_global.apply(lambda row: get_ship_info(row, 'crew_max'), axis=1)
 
-    # Conversions
     df_global["Prix_USD"] = pd.to_numeric(df_global["Prix_USD"], errors="coerce").fillna(0)
     df_global["Prix_aUEC"] = pd.to_numeric(df_global["Prix_aUEC"], errors="coerce").fillna(0)
     
-    # --- CALCUL DES KPIS (Rétablissement de l'affichage) ---
+
+    # --- CALCUL DES KPIS ---
     total_ships = len(df_global)
     total_dispo = int(df_global["Dispo"].sum())
-    total_pilots = len(df_global['Propriétaire'].unique())
+    total_pilots = len(st.session_state.db["users"])
+
     total_value_usd = df_global[df_global["Source"] == "STORE"]["Prix_USD"].sum()
     total_value_aUEC = df_global[df_global["Source"] == "INGAME"]["Prix_aUEC"].sum()
 
     st.markdown("---")
 
+    # AFFICHAGE DES KPI AVEC TOGGLE
     col_kpi, col_toggle = st.columns([4, 1])
+
     with col_toggle:
         show_value_kpi = st.toggle("Afficher Valorisation Totale", value=False, key="toggle_corpo_kpi")
 
@@ -898,10 +962,11 @@ def corpo_fleet_page():
 
     st.markdown("---")
 
-    # === ANALYSES GRAPHIQUES (Code inchangé) ===
-    # ... (Le code des graphiques Donut et Bar Chart est omis ici pour la concision de la réponse)
+    # --- ANALYSES GRAPHIQUES (Code omis pour la concision de la réponse) ---
 
-    # === LISTE DÉTAILLÉE DES UNITÉS (Regroupement) ===
+    st.markdown("---")
+
+    # === LISTE DÉTAILLÉE DES UNITÉS (Tableau Regroupé par Pilote) ===
     st.markdown("### 📋 LISTE DÉTAILLÉE DES UNITÉS")
 
     # AJOUT DU FILTRE DE RECHERCHE RAPIDE
@@ -911,7 +976,7 @@ def corpo_fleet_page():
     display_df = df_global.copy()
     if st.checkbox("✅ Afficher uniquement les vaisseaux opérationnels", value=False, key="global_dispo_check"):
         display_df = display_df[display_df["Dispo"] == True].copy()
-        
+
     # Application de la recherche rapide
     if search_term:
         search_term = search_term.lower()
@@ -922,16 +987,14 @@ def corpo_fleet_page():
         ].copy()
 
 
-    # 1. Regrouper les lignes (Pilotes du même modèle/source/assurance)
-    # NOUVEAU GROUPEMENT: Groupement uniquement par les propriétés du Vaisseau.
-    detail_data = display_df.groupby(['Vaisseau', 'Marque', 'Rôle', 'Classification', 'Source']).agg(
-        Pilotes=('Propriétaire', lambda x: ', '.join(sorted(x.unique()))),
-        Assurances=('Assurance', lambda x: ', '.join(sorted(x.unique()))), # Collecter les différentes assurances
-        Quantité=('Vaisseau', 'count'), 
+    # 1. Regrouper les lignes pour la LISTE DÉTAILLÉE (Regrouper par Modèle, Classification, et Source - Ignorer l'Assurance pour la fusion)
+    detail_data = display_df.groupby(['Vaisseau', 'Marque', 'Rôle', 'Source']).agg(
+        Pilotes=('Propriétaire', lambda x: ', '.join(sorted(x.unique()))), # JOINDRE LES PILOTES
+        Assurance=('Assurance', lambda x: ', '.join(sorted(x.unique()))), # JOINDRE LES ASSURANCES
+        Quantité=('Vaisseau', 'count'), # Nombre de ships par ligne
         Crew_Max=('Crew_Max_Catalog', 'first'),
         Image=('Image', 'first'),
     ).reset_index()
-
 
     # 2. Préparer les colonnes pour l'affichage final
     display_for_table = pd.DataFrame()
@@ -939,7 +1002,7 @@ def corpo_fleet_page():
     display_for_table['Modèle'] = detail_data['Vaisseau']
     display_for_table['Classification'] = detail_data['Rôle']
     display_for_table['Source'] = detail_data['Source']
-    display_for_table['Assurance'] = detail_data['Assurances'] # Utilisation de la liste des assurances
+    display_for_table['Assurance'] = detail_data['Assurance'] # Liste des assurances fusionnées
     display_for_table['Crew Max'] = detail_data['Crew_Max']
     display_for_table['NB Ex.'] = detail_data['Quantité']
     
@@ -968,7 +1031,7 @@ def corpo_fleet_page():
             "Source": st.column_config.TextColumn("SOURCE"),
             "Assurance": st.column_config.TextColumn("ASSURANCE", help="Assurances possédées pour ce modèle"),
             "Crew Max": st.column_config.TextColumn("CREW MAX"),
-            "Aperçu": st.column_config.ImageColumn("APERÇU", width="small"),
+            "Visuel": st.column_config.ImageColumn("APERÇU", width="small"),
             "Prix": st.column_config.TextColumn("PRIX"),
             "NB Ex.": st.column_config.TextColumn("NB EX.", width="small"), 
         },
