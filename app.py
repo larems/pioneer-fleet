@@ -1158,11 +1158,13 @@ def corpo_fleet_page():
         key="global_fleet_detail",
     )
 
-    # VUE TACTIQUE (Logique corrigée pour gérer l'absence de sélection)
-    # st.dataframe renvoie un dictionnaire {'selection': {'rows': [idx]}} ou {'selection': {'rows': []}}
-    # On vérifie la présence de 'selection' et que la liste 'rows' n'est pas vide.
-    if selection and selection.get("selection") and selection["selection"].get("rows"):
-        idx = selection["selection"]["rows"][0]
+    # VUE TACTIQUE (Logique corrigée et SÉCURISÉE)
+    # On utilise .get() avec des valeurs par défaut pour éviter tout KeyError/TypeError
+    # si la structure de sélection est incomplète ou si aucune ligne n'est cliquée.
+    selected_indices = selection.get("selection", {}).get("rows", [])
+    
+    if selected_indices:
+        idx = selected_indices[0]
         selected_row = display_df.iloc[idx]
 
         st.markdown("---")
