@@ -168,7 +168,7 @@ def add_ship_action():
 
     img_b64 = get_local_img_as_base64(info.get("img", ""))
     price_usd = info.get("price", 0.0)
-    price_auec = info.get("auec_price", 0.0)
+    price_aUEC = info.get("auec_price", 0.0)
 
     new_entry = {
         "id": new_id,
@@ -181,7 +181,7 @@ def add_ship_action():
         "Visuel": img_b64,
         "Source": source,
         "Prix_USD": float(price_usd or 0),
-        "Prix_aUEC": float(price_auec or 0),
+        "Prix_aUEC": float(price_aUEC or 0),
         "Assurance": insurance,
     }
 
@@ -220,9 +220,7 @@ def process_fleet_updates(edited_df: pd.DataFrame):
         st.toast(f"🗑️ {len(ids_to_delete)} vaisseaux supprimés.", icon="🗑️")
 
     # Mise à jour dispo / assurance
-    update_df = edited_df[
-        ~edited_df["id"].isin(ids_to_delete)
-    ].copy()
+    update_df = edited_df[~edited_df["id"].isin(ids_to_delete)].copy()
     if not update_df.empty:
         for ship in current_fleet:
             sid = ship.get("id")
@@ -533,9 +531,7 @@ def render_sidebar():
 def home_page():
     """Page d'accueil avec connexion centrale."""
     st.markdown(
-        """
-<div style="margin-top:40px;"></div>
-""",
+        "<div style='margin-top:40px;'></div>",
         unsafe_allow_html=True,
     )
     col_left, col_center, col_right = st.columns([1, 1.2, 1])
@@ -566,7 +562,7 @@ def home_page():
                 "<div style='height:12px;'></div>",
                 unsafe_allow_html=True,
             )
-            st.subheader("Connexion pilote", divider="gray")
+            st.subheader("CONNEXION PILOTE", divider="gray")
             pseudo = st.text_input("Identifiant de pilote", key="landing_pseudo")
             pin = st.text_input(
                 "PIN (4 chiffres)", type="password", max_chars=4, key="landing_pin"
@@ -935,15 +931,15 @@ def my_hangar_page():
     st.markdown("## 💸 HANGAR INGAME (Acquisition aUEC)")
 
     if not df_ingame.empty:
-        total_auec = (
+        total_aUEC = (
             pd.to_numeric(df_ingame["Prix_aUEC"], errors="coerce").fillna(0).sum()
         )
-        col_auec, col_toggle_auec = st.columns([3, 1])
-        show_auec = col_toggle_auec.toggle(
-            "Afficher Coût Total (aUEC)", value=False, key="toggle_auec"
+        col_aUEC, col_toggle_aUEC = st.columns([3, 1])
+        show_aUEC = col_toggle_aUEC.toggle(
+            "Afficher Coût Total (aUEC)", value=False, key="toggle_aUEC"
         )
-        col_auec.metric(
-            "COÛT ACQUISITION", f"{total_auec:,.0f} aUEC" if show_auec else "---"
+        col_aUEC.metric(
+            "COÛT ACQUISITION", f"{total_aUEC:,.0f} aUEC" if show_aUEC else "---"
         )
 
         edited_ingame_display = st.data_editor(
@@ -994,10 +990,14 @@ def corpo_fleet_page():
         )
         return
 
-    df_global = pd.DataFrame(st.session_state.db["fleet"])
-    df_global = normalize_db_schema({"fleet": df_global.to_dict("records")})["fleet"]
-    df_global = pd.DataFrame(df_global)
+    # Normalisation pour être sûr d'avoir toutes les colonnes
+    df_global_raw = pd.DataFrame(st.session_state.db["fleet"])
+    df_global_norm = normalize_db_schema(
+        {"fleet": df_global_raw.to_dict("records")}
+    )["fleet"]
+    df_global = pd.DataFrame(df_global_norm)
 
+    # KPI principaux
     total_ships = len(df_global)
     total_dispo = int(df_global["Dispo"].sum())
     total_pilots = len(st.session_state.db["users"])
@@ -1009,7 +1009,7 @@ def corpo_fleet_page():
         .fillna(0)
         .sum()
     )
-    total_value_auec = (
+    total_value_aUEC = (
         pd.to_numeric(
             df_global[df_global["Source"] == "INGAME"]["Prix_aUEC"], errors="coerce"
         )
@@ -1017,46 +1017,71 @@ def corpo_fleet_page():
         .sum()
     )
 
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("PILOTES", total_pilots)
-    col2.metric("FLOTTE TOTALE", total_ships)
-    col3.metric("OPÉRATIONNELS", total_dispo)
-    col4.metric("VALEUR USD", f"${total_value_usd:,.0f}")
-    col5.metric("COÛT aUEC", f"{total_value_auec:,.0f} aUEC")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("PILOTES", total_pilots)
+    c2.metric("FLOTTE TOTALE", total_ships)
+    c3.metric("OPÉRATIONNELS", total_dispo)
+    c4.metric("VALEUR STORE", f"${total_value_usd:,.0f}")
+    c5.metric("COÛT INGAME", f"{total_value_aUEC:,.0f} aUEC")
 
     st.markdown("---")
 
-    # ANALYSES GRAPHIQUES
+    # === ANALYSES GRAPHIQUES (version plus clean) ===
     st.markdown("### 📊 ANALYSE DE COMPOSITION")
     col_chart1, col_chart2 = st.columns(2)
 
+    # 1) Donut par Marque (nombre d'unités)
     summary_brand = df_global.groupby("Marque").size().reset_index(name="Quantité")
+    summary_brand = summary_brand.sort_values("Quantité", ascending=False)
+
     fig_brand = px.pie(
         summary_brand,
         values="Quantité",
         names="Marque",
-        title="Distribution par Constructeur",
-        color_discrete_sequence=px.colors.sequential.Plasma,
+        hole=0.45,
+        title="Répartition de la flotte par constructeur",
+        color_discrete_sequence=px.colors.sequential.Blues_r,
     )
-    fig_brand.update_layout(height=400, template="plotly_dark")
+    fig_brand.update_traces(
+        textposition="inside",
+        textinfo="percent+label",
+        pull=[0.04] + [0] * (len(summary_brand) - 1),
+    )
+    fig_brand.update_layout(
+        template="plotly_dark",
+        height=420,
+        margin=dict(t=60, b=0, l=0, r=0),
+        showlegend=False,
+    )
     col_chart1.plotly_chart(fig_brand, use_container_width=True)
 
+    # 2) Bar chart horizontal par rôle (nombre d'unités)
     summary_role = df_global.groupby("Rôle").size().reset_index(name="Quantité")
+    summary_role = summary_role.sort_values("Quantité", ascending=True)
+
     fig_role = px.bar(
-        summary_role.sort_values(by="Quantité", ascending=False).head(10),
-        x="Rôle",
-        y="Quantité",
-        title="Top 10 Vaisseaux par Rôle",
-        color_discrete_sequence=["#30E8FF"],
+        summary_role,
+        x="Quantité",
+        y="Rôle",
+        orientation="h",
+        title="Répartition par rôle",
+        color="Quantité",
+        color_continuous_scale="Blues",
     )
     fig_role.update_layout(
-        height=400, template="plotly_dark", xaxis={"categoryorder": "total descending"}
+        template="plotly_dark",
+        height=420,
+        margin=dict(t=60, b=10, l=10, r=10),
+        xaxis_title="Nombre de vaisseaux",
+        yaxis_title="",
+        coloraxis_showscale=False,
     )
+    fig_role.update_traces(marker_line_width=0.5, marker_line_color="#0a141f")
     col_chart2.plotly_chart(fig_role, use_container_width=True)
 
     st.markdown("---")
 
-    # RÉSUMÉ DES STOCKS
+    # === RÉSUMÉ DES STOCKS ===
     st.markdown("### 📦 RÉSUMÉ DES STOCKS")
     summary_df = (
         df_global.groupby(["Vaisseau", "Marque", "Rôle"])
@@ -1082,7 +1107,7 @@ def corpo_fleet_page():
 
     st.markdown("---")
 
-    # LISTE DÉTAILLÉE
+    # === LISTE DÉTAILLÉE + VUE TACTIQUE ===
     st.markdown("### 📋 LISTE DÉTAILLÉE DES UNITÉS")
 
     show_only_dispo = st.checkbox(
@@ -1096,10 +1121,15 @@ def corpo_fleet_page():
     display_df["Statut"] = display_df["Dispo"].apply(
         lambda x: "✅ DISPONIBLE" if x else "⛔ NON ASSIGNÉ"
     )
+    # Prix d'acquisition propre (un seul prix affiché selon la source)
     display_df["Prix_Acquisition"] = display_df.apply(
-        lambda row: f"{row['Prix_aUEC']:,.0f} aUEC"
-        if row["Source"] == "INGAME"
-        else f"${row['Prix_USD']:,.0f} USD",
+        lambda row: (
+            f"{row['Prix_aUEC']:,.0f} aUEC"
+            if row["Source"] == "INGAME" and row["Prix_aUEC"] > 0
+            else f"${row['Prix_USD']:,.0f} USD"
+            if row["Source"] == "STORE" and row["Prix_USD"] > 0
+            else "N/A"
+        ),
         axis=1,
     )
 
@@ -1128,6 +1158,7 @@ def corpo_fleet_page():
         key="global_fleet_detail",
     )
 
+    # VUE TACTIQUE
     if selection["selection"]["rows"]:
         idx = selection["selection"]["rows"][0]
         selected_row = display_df.iloc[idx]
@@ -1148,18 +1179,20 @@ def corpo_fleet_page():
             else:
                 st.warning("Visuel non disponible localement.")
 
-        with col_details:
-            prix_usd_format = (
-                f"${selected_row['Prix_USD']:,.0f}"
-                if selected_row.get("Prix_USD") is not None
-                else "N/A"
-            )
-            prix_auec_format = (
-                f"{selected_row['Prix_aUEC']:,.0f} aUEC"
-                if selected_row.get("Prix_aUEC") is not None
-                else "N/A"
-            )
+        # Prix propres : on masque les 0 / valeurs vides
+        prix_usd = float(selected_row.get("Prix_USD") or 0)
+        prix_aUEC = float(selected_row.get("Prix_aUEC") or 0)
 
+        prix_usd_format = (
+            f"${prix_usd:,.0f}" if prix_usd > 0 and selected_row["Source"] == "STORE" else "N/A"
+        )
+        prix_aUEC_format = (
+            f"{prix_aUEC:,.0f} aUEC"
+            if prix_aUEC > 0 and selected_row["Source"] == "INGAME"
+            else "N/A"
+        )
+
+        with col_details:
             st.markdown(
                 f"""
 <div style="background:rgba(0,0,0,0.5); padding:20px; border-radius:10px; border:1px solid #333;">
@@ -1171,7 +1204,7 @@ def corpo_fleet_page():
   <h4 style="color:#00d4ff;">ASSURANCE : <span style="color:#fff">{selected_row['Assurance']}</span></h4>
   <br>
   <h4>PRIX STORE : <span style="color:#00d4ff">{prix_usd_format}</span></h4>
-  <h4>PRIX INGAME : <span class="auec-price">{prix_auec_format}</span></h4>
+  <h4>PRIX INGAME : <span class="auec-price">{prix_aUEC_format}</span></h4>
   <br>
   <h2 style="color:{'#00ff00' if selected_row['Dispo'] else '#ff4b4b'} !important">
     {selected_row['Statut']}
@@ -1183,15 +1216,19 @@ def corpo_fleet_page():
 
 
 # --- 8. APP PRINCIPALE ---
-st.title("PIONEER COMMAND | CONSOLE D'OPÉRATIONS")
 
 render_sidebar()
 
 if not st.session_state.current_pilot:
-    # Page d'accueil / login
+    # Page d'accueil sans gros titre global
     home_page()
 else:
-    # Navigation interne
+    # Titre global uniquement après connexion
+    st.markdown(
+        "<h1>PIONEER COMMAND | CONSOLE D'OPÉRATIONS</h1>",
+        unsafe_allow_html=True,
+    )
+
     if st.session_state.menu_nav == "CATALOGUE":
         catalogue_page()
     elif st.session_state.menu_nav == "MON HANGAR":
