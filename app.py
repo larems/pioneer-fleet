@@ -107,7 +107,7 @@ def save_db_to_cloud(data):
 
     try:
         response = requests.put(url, json=data, headers=headers, timeout=10)
-        if response.status_code not in (200, 204):
+        if response.status_code not in (200, 204, 403):
             st.error(f"Erreur de sauvegarde DB: Statut {response.status_code}")
             return False
     except requests.exceptions.RequestException as e:
