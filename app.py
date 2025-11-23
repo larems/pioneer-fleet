@@ -244,7 +244,7 @@ def refresh_prices_from_catalog(source_type: str):
         else:
             st.error("❌ Erreur lors de la sauvegarde après la mise à jour des prix.")
 
-    st.rerun() # Rerun forcer pour rafraîchir l'affichage
+    st.rerun() # Re-run forcer pour rafraîchir l'affichage
 
 
 def process_fleet_updates(edited_df: pd.DataFrame):
@@ -423,7 +423,7 @@ p, div, span, label, .stMarkdown, .stText {{
     border-radius: 3px;
     background: rgba(0, 0, 0, 0.6);
     border: 1px solid rgba(255, 255, 255, 0.12);
-    color: #e0e8f0;
+    color: #e0e0e0;
 }}
 .card-info {{
     padding: 10px 16px 12px 16px;
@@ -613,7 +613,7 @@ def catalogue_page():
         purchase_source = st.radio("SOURCE DE POSSESSION", ["STORE", "INGAME"], captions=["(Achat USD)", "(Achat aUEC)"], index=0 if st.session_state.selected_source == "STORE" else 1, horizontal=False, key="purchase_source_radio")
         st.session_state.selected_source = purchase_source
         
-        insurance_options = ["LTI", "10 Ans", "6 Mois", "2 Mois", "Standard"] 
+        insurance_options = ["LTI", "10 Ans", "2 ans", "6 Mois", "2 Mois", "Standard"] 
         selected_insurance = st.selectbox("ASSURANCE ACQUISE", insurance_options, index=insurance_options.index(st.session_state.selected_insurance), key="insurance_selectbox")
         st.session_state.selected_insurance = selected_insurance
 
@@ -752,7 +752,7 @@ def my_hangar_page():
     st.subheader(f"HANGAR LOGISTIQUE | PILOTE: {st.session_state.current_pilot}")
     st.markdown("---")
 
-    # --- LECTURE DES VARIABLES NÉCESSAIRES EN DÉBUT DE FONCTION ---
+    # --- LECTURE DES VARIABLES NÉCESSAIRES EN DÉBUT DE FONCTION (CORRECTION DU NAMERROR) ---
     pilot_data = st.session_state.db.get("user_data", {}).get(st.session_state.current_pilot, {})
     current_auec_balance = pilot_data.get("auec_balance", 0)
     final_target_name = pilot_data.get("acquisition_target", None)
@@ -1216,7 +1216,6 @@ def corpo_fleet_page():
 
 
     # 1. Regrouper les lignes pour la LISTE DÉTAILLÉE (Regrouper par Modèle, Classification, et Source - Ignorer l'Assurance pour la fusion)
-    # FIX: Regroupement sur les colonnes Vaisseau, Rôle, Source.
     detail_data = display_df.groupby(['Vaisseau', 'Marque', 'Rôle', 'Source']).agg(
         Pilotes=('Propriétaire', lambda x: ', '.join(sorted(x.unique()))), # JOINDRE LES PILOTES
         Assurance=('Assurance', lambda x: ', '.join(sorted(x.unique()))), # JOINDRE LES ASSURANCES
@@ -1235,7 +1234,7 @@ def corpo_fleet_page():
     display_for_table['Crew Max'] = detail_data['Crew_Max']
     display_for_table['NB Ex.'] = detail_data['Quantité']
     
-    # FIX: Régénérer la Base64 en utilisant la colonne 'Image' (chemin local)
+    # Régénérer la Base64 en utilisant la colonne 'Image' (chemin local)
     display_for_table['Visuel'] = detail_data['Image'].apply(get_local_img_as_base64)
     
     # Calculer le Prix Affiché (du modèle)
@@ -1275,3 +1274,15 @@ def corpo_fleet_page():
         selection_mode="disabled", 
         key="global_fleet_detail",
     )
+
+
+# --- MAIN ---
+render_sidebar()
+
+if not st.session_state.current_pilot:
+    home_page()
+else:
+    st.markdown("<h1>PIONEER COMMAND | CONSOLE D'OPÉRATIONS</h1>", unsafe_allow_html=True)
+    if st.session_state.menu_nav == "CATALOGUE": catalogue_page()
+    elif st.session_state.menu_nav == "MON HANGAR": my_hangar_page()
+    elif st.session_state.menu_nav == "FLOTTE CORPO": corpo_fleet_page()
