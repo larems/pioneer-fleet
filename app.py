@@ -479,6 +479,18 @@ p, div, span, label, .stMarkdown, .stText {{
 .card-footer-button {{
     margin-top: 0;
 }}
+div.card-footer-button > div.stButton > button {{
+    width: 100%;
+    border-radius: 0 0 8px 8px;
+    background: linear-gradient(90deg, #00d4ff, #30e8ff);
+    color: #041623;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: 8px 0;
+    font-weight: 700;
+}}
 div.stButton > button:hover {{
     border-color: #00d4ff;
     color: #00d4ff;
@@ -949,6 +961,9 @@ def my_hangar_page():
         df_my["Prix_USD"] = pd.to_numeric(df_my["Prix_USD"], errors="coerce").fillna(0)
         df_my["Prix_aUEC"] = pd.to_numeric(df_my["Prix_aUEC"], errors="coerce").fillna(0)
 
+        # Correction : Forcer la Base64 des images locales pour l'aperçu du tableau
+        df_my['Visuel'] = df_my['Image'].apply(get_local_img_as_base64) 
+        
         # Colonnes nécessaires pour la sauvegarde mais invisibles
         columns_internal = ["id", "Image", "Propriétaire", "Prix_USD", "Prix_aUEC", "Prix"]
         
@@ -991,7 +1006,6 @@ def my_hangar_page():
             "Source": st.column_config.TextColumn("SOURCE", width="small"), # Rendre Source visible
             "Assurance": st.column_config.SelectboxColumn(
                 "ASSURANCE",
-                # FIX: La liste est corrigée ici
                 options=["LTI", "10 Ans", "2 ans", "6 Mois", "2 Mois", "Standard"], 
                 width="medium",
             ),
@@ -1319,15 +1333,9 @@ def corpo_fleet_page():
 
     # === RÉSUMÉ DES STOCKS ===
     st.markdown("### 📦 RÉSUMÉ DES STOCKS")
-    
-    # Correction pour compter le nombre de fois que le modèle est possédé
     summary_df = (
         df_global.groupby(["Vaisseau", "Marque", "Rôle"])
-        .agg(
-            Quantité=("Vaisseau", "count"), 
-            Dispo=("Dispo", "sum"),
-            Crew_Max=("crew_max", "first") 
-        )
+        .agg(Quantité=("Vaisseau", "count"), Dispo=("Dispo", "sum"))
         .reset_index()
         .sort_values(by="Quantité", ascending=False)
     )
@@ -1342,7 +1350,6 @@ def corpo_fleet_page():
                 max_value=int(summary_df["Quantité"].max()),
             ),
             "Dispo": st.column_config.NumberColumn("Prêtables"),
-            "Crew_Max": st.column_config.NumberColumn("CREW MAX", format="%d"), 
         },
         use_container_width=True,
         hide_index=True,
@@ -1387,7 +1394,6 @@ def corpo_fleet_page():
             "Vaisseau": st.column_config.TextColumn("Modèle", width="medium"),
             "Rôle": st.column_config.TextColumn("Classification", width="medium"),
             "Prix_Acquisition": st.column_config.TextColumn("Prix", width="medium"),
-            "crew_max": st.column_config.TextColumn("CREW MAX", width="small"), 
             # Colonnes à masquer
             "Image": None,
             "Prix_USD": None,
@@ -1433,7 +1439,6 @@ def corpo_fleet_page():
 
         prix_usd = selected_row.get("Prix_USD", 0.0)
         prix_aUEC = selected_row.get("Prix_aUEC", 0.0)
-        crew_max = selected_row.get("crew_max", 1) 
 
         prix_usd_format = (
             f"${prix_usd:,.0f}"
@@ -1453,7 +1458,6 @@ def corpo_fleet_page():
   <h4>PILOTE : <span style="color:#fff">{selected_row['Propriétaire']}</span></h4>
   <h4>RÔLE : <span style="color:#fff">{selected_row['Rôle']}</span></h4>
   <h4>CONSTRUCTEUR : <span style="color:#fff">{selected_row['Marque']}</span></h4>
-  <h4>CREW MAX : <span style="color:#fff">{crew_max}</span></h4>
   <br>
   <h4>SOURCE D'ACHAT : <span style="color:#fff">{selected_row['Source']}</span></h4>
   <h4 style="color:#00d4ff;">ASSURANCE : <span style="color:#fff">{selected_row['Assurance']}</span></h4>
