@@ -994,6 +994,7 @@ def my_hangar_page():
             "Source": st.column_config.TextColumn("SOURCE", width="small"), # Rendre Source visible
             "Assurance": st.column_config.SelectboxColumn(
                 "ASSURANCE",
+                # FIX: La liste est corrigée ici
                 options=["LTI", "10 Ans", "2 ans", "6 Mois", "2 Mois", "Standard"], 
                 width="medium",
             ),
@@ -1221,7 +1222,7 @@ def corpo_fleet_page():
     )["fleet"]
     df_global = pd.DataFrame(df_global_norm)
 
-    # Conversion des colonnes prix en numérique
+    # Conversion des colonnes prix/crew en numérique
     df_global["Prix_USD"] = pd.to_numeric(df_global["Prix_USD"], errors="coerce").fillna(
         0
     )
@@ -1229,6 +1230,9 @@ def corpo_fleet_page():
         df_global["Prix_aUEC"], errors="coerce"
     ).fillna(0)
 
+    # FIX: Forcer la Base64 des images locales pour l'aperçu du tableau global
+    df_global['Visuel'] = df_global['Image'].apply(get_local_img_as_base64)
+    
     # KPI principaux
     total_ships = len(df_global)
     total_dispo = int(df_global["Dispo"].sum())
@@ -1321,9 +1325,15 @@ def corpo_fleet_page():
 
     # === RÉSUMÉ DES STOCKS ===
     st.markdown("### 📦 RÉSUMÉ DES STOCKS")
+    
+    # Correction pour compter le nombre de fois que le modèle est possédé
     summary_df = (
         df_global.groupby(["Vaisseau", "Marque", "Rôle"])
-        .agg(Quantité=("Vaisseau", "count"), Dispo=("Dispo", "sum"))
+        .agg(
+            Quantité=("Vaisseau", "count"), 
+            Dispo=("Dispo", "sum"),
+            Crew_Max=("crew_max", "first") 
+        )
         .reset_index()
         .sort_values(by="Quantité", ascending=False)
     )
@@ -1338,6 +1348,7 @@ def corpo_fleet_page():
                 max_value=int(summary_df["Quantité"].max()),
             ),
             "Dispo": st.column_config.NumberColumn("Prêtables"),
+            "Crew_Max": st.column_config.NumberColumn("CREW MAX", format="%d"), 
         },
         use_container_width=True,
         hide_index=True,
@@ -1417,7 +1428,7 @@ def corpo_fleet_page():
 
         with col_img:
             image_path = selected_row.get("Image")
-            if os.path.exists(image_path):
+            if image_path and os.path.exists(image_path):
                 st.image(
                     image_path,
                     use_container_width=True,
