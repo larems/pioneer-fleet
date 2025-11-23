@@ -16,8 +16,8 @@ st.set_page_config(
 BACKGROUND_IMAGE = "assets/fondecransite.png"
 
 # --- 2. GESTION DATABASE (JSONBIN.IO) ---
-# NOTE: J'utilise l'ID du fichier que vous avez fourni.
-JSONBIN_ID = "6921f0ded0ea881f40f9933f" 
+# NOTE: L'ID est celui que vous avez fourni en dernier.
+JSONBIN_ID = "6921f0ded0ea881f40f9433f" 
 JSONBIN_KEY = "" # Clé MASTER KEY JSONBin.io (laissez vide pour lecture seule en mode dev)
 
 
@@ -43,11 +43,9 @@ def normalize_db_schema(db: dict) -> dict:
         ship.setdefault("Prix_USD", 0.0)
         
         # Le prix aUEC doit pouvoir être une chaîne si non achetable. 
-        # On utilise le prix Ingame depuis SHIPS_DB comme base pour la normalisation.
         ship_name = ship.get("Vaisseau", "Inconnu")
         db_price_auec = SHIPS_DB.get(ship_name, {}).get("auec_price", 0.0)
         
-        # Si le prix catalogue est la chaîne (Non achetable), on utilise la chaîne
         if isinstance(db_price_auec, str):
             ship.setdefault("Prix_aUEC", db_price_auec) 
         else:
@@ -75,10 +73,9 @@ def normalize_db_schema(db: dict) -> dict:
             if ship.get("Source") == "STORE" and float(ship.get("Prix_USD", 0) or 0) == 0:
                 ship["Prix_USD"] = legacy_price_clean
             
-            # ATTENTION: Le prix legacy ne devrait pas écraser une chaîne descriptive,
-            # mais dans votre ancienne base, tout était float.
-            if ship.get("Source") == "INGAME" and isinstance(ship.get("Prix_aUEC"), (int, float)) and float(ship.get("Prix_aUEC", 0) or 0) == 0:
-                ship["Prix_aUEC"] = legacy_price_clean
+            current_auec_price = ship.get("Prix_aUEC")
+            if ship.get("Source") == "INGAME" and isinstance(current_auec_price, (int, float)) and float(ship.get("Prix_aUEC", 0) or 0) == 0:
+                 ship["Prix_aUEC"] = legacy_price_clean
     
     # Normalisation du user_data
     for pilot in db.get("users", {}).keys():
@@ -106,7 +103,8 @@ def load_db_from_cloud():
             data = response.json().get("record", {"users": {}, "fleet": []})
             return normalize_db_schema(data)
         else:
-            st.error(f"Erreur de chargement DB: Statut {response.status_code}.")
+            st.error(f"Erreur de chargement DB: Statut {response.status_code}. Vérifiez l'ID: {JSONBIN_ID}")
+            return {"users": {}, "fleet": []}
     except requests.exceptions.RequestException as e:
         st.error(f"Erreur réseau/timeout lors du chargement: {e}")
 
@@ -213,7 +211,7 @@ def add_ship_action():
         "Visuel": "", # TRÈS IMPORTANT : Stocker vide pour ne pas dépasser 100KB
         "Source": source,
         "Prix_USD": float(price_usd or 0),
-        "Prix_aUEC": price_aUEC,
+        "Prix_aUEC": price_aUEC, 
         "Assurance": insurance,
         "Prix": None, 
         "crew_max": info.get("crew_max", 1), 
@@ -831,7 +829,7 @@ def catalogue_page():
 
 
 def my_hangar_page():
-    """Affiche et permet la modification de la flotte personnelle, séparée par source."""
+    """Affiche et permet la modification de la flotte personnelle, séparée par source, avec totaux et recherche."""
     st.subheader(f"HANGAR LOGISTIQUE | PILOTE: {st.session_state.current_pilot}")
     st.markdown("---")
 
@@ -855,31 +853,11 @@ def my_hangar_page():
         df_my = pd.DataFrame(my_fleet)
         df_my["Supprimer"] = False
 
-        # Conversion des colonnes de prix en numérique (pour les sommes)
+        # Conversion des prix en numérique pour les calculs de totaux (les chaînes deviennent 0)
         df_my["Prix_USD"] = pd.to_numeric(df_my["Prix_USD"], errors="coerce").fillna(0)
-        
-        # Le prix aUEC peut être un nombre ou une chaîne. On le convertit en numérique pour le calcul du total.
         df_my["Prix_aUEC_Num"] = df_my["Prix_aUEC"].apply(lambda x: float(x) if isinstance(x, (int, float)) else 0)
 
-
-        # Correction : Forcer la Base64 des images locales pour l'aperçu du tableau
-        df_my['Visuel'] = df_my['Image'].apply(get_local_img_as_base64)
-        
-        # 1. Calcul de la colonne de prix unique pour l'affichage
-        df_my["Prix_Acquisition"] = df_my.apply(
-            lambda row: (
-                f"{row['Prix_aUEC_Num']:,.0f} aUEC"
-                if row["Source"] == "INGAME" and row['Prix_aUEC_Num'] > 0
-                else row['Prix_aUEC']
-                if row["Source"] == "INGAME" and isinstance(row["Prix_aUEC"], str) # Affiche la chaîne descriptive
-                else f"${row['Prix_USD']:,.0f} USD"
-                if row["Source"] == "STORE" and row["Prix_USD"] > 0
-                else "N/A"
-            ),
-            axis=1,
-        )
-
-        # --- AJOUT DES KPIS (TOTAL VAISSEAUX PAR SOURCE) ---
+        # --- AFFICHAGE DES KPIS (TOTAUX) ---
         total_store_ships = len(df_my[df_my["Source"] == "STORE"])
         total_ingame_ships = len(df_my[df_my["Source"] == "INGAME"])
         
@@ -896,12 +874,11 @@ def my_hangar_page():
         
         st.markdown("---")
 
-        # --- AJOUT BARRE DE RECHERCHE ET FILTRAGE ---
-        search_term = st.text_input("🔍 Rechercher dans mon hangar (Vaisseau, Marque, Rôle, Assurance)", key="hangar_search_input")
+        # --- BARRE DE RECHERCHE ET FILTRAGE ---
+        search_term = st.text_input("🔍 Rechercher dans mon hangar (Vaisseau, Marque, Rôle, Assurance)", key="hangar_search_input").lower()
         
         df_filtered = df_my.copy()
         if search_term:
-            search_term = search_term.lower()
             df_filtered = df_filtered[
                 df_filtered['Vaisseau'].str.lower().str.contains(search_term) |
                 df_filtered['Marque'].str.lower().str.contains(search_term) |
@@ -909,14 +886,30 @@ def my_hangar_page():
                 df_filtered['Assurance'].str.lower().str.contains(search_term)
             ].copy()
 
-        # Re-séparation du DataFrame filtré
+        # Re-séparation du DataFrame filtré pour l'affichage
         df_store = df_filtered[df_filtered["Source"] == "STORE"].reset_index(drop=True).copy()
         df_ingame = df_filtered[df_filtered["Source"] == "INGAME"].reset_index(drop=True).copy()
+        
+        # Correction : Forcer la Base64 des images locales pour l'aperçu du tableau
+        df_my['Visuel'] = df_my['Image'].apply(get_local_img_as_base64)
 
+        # 1. Calcul de la colonne de prix unique pour l'affichage
+        df_my["Prix_Acquisition"] = df_my.apply(
+            lambda row: (
+                f"{row['Prix_aUEC_Num']:,.0f} aUEC"
+                if row["Source"] == "INGAME" and row['Prix_aUEC_Num'] > 0
+                else row['Prix_aUEC']
+                if row["Source"] == "INGAME" and isinstance(row["Prix_aUEC"], str) # Affiche la chaîne descriptive
+                else f"${row['Prix_USD']:,.0f} USD"
+                if row["Source"] == "STORE" and row["Prix_USD"] > 0
+                else "N/A"
+            ),
+            axis=1,
+        )
 
-        # Colonnes visibles dans l'ordre souhaité
+        # Colonnes visibles et configurées
         columns_for_display = [
-            "id", # Invisible dans l'éditeur, mais nécessaire pour le mapping
+            "id", 
             "Vaisseau", 
             "Marque", 
             "Rôle", 
@@ -928,38 +921,25 @@ def my_hangar_page():
             "Supprimer"
         ]
         
-        # Configuration des colonnes affichées pour n'inclure que la colonne unique de prix
         editable_columns_base = {
-            "id": st.column_config.Column(
-                "ID",
-                disabled=True,
-                width="small"
-            ),
+            "id": st.column_config.Column("ID", disabled=True, width="small"),
             "Dispo": st.column_config.CheckboxColumn("OPÉRATIONNEL ?", width="small"),
             "Supprimer": st.column_config.CheckboxColumn("SUPPRIMER", width="small"),
             "Visuel": st.column_config.ImageColumn("APERÇU", width="small"),
-            "Source": st.column_config.TextColumn("SOURCE", disabled=True, width="small"), # Rendre Source visible
+            "Source": st.column_config.TextColumn("SOURCE", disabled=True, width="small"),
             "Assurance": st.column_config.SelectboxColumn(
                 "ASSURANCE",
                 options=["LTI", "10 Ans", "6 Mois", "2 Mois", "Standard"],
                 width="medium",
             ),
-            # Colonne Prix_Acquisition affichée comme texte pour garder le formatage monétaire unique
             "Prix_Acquisition": st.column_config.TextColumn("PRIX", disabled=True, width="small"),
             "Vaisseau": st.column_config.TextColumn("Vaisseau", disabled=True, width="medium"),
             "Marque": st.column_config.TextColumn("Marque", disabled=True, width="small"),
             "Rôle": st.column_config.TextColumn("Rôle", disabled=True, width="small"),
         }
         
-        # Colonnes à désactiver dans l'éditeur (sauf les champs modifiables)
-        disabled_cols = [
-            "Vaisseau",
-            "Marque",
-            "Rôle",
-            "Visuel",
-            "Source",
-            "Prix_Acquisition",
-        ]
+        disabled_cols = [col for col in editable_columns_base.keys() if col not in ["Dispo", "Assurance", "Supprimer"]]
+
         
         # --- HANGAR STORE (Affichage après filtrage) ---
         df_store_display = df_store[columns_for_display].copy()
@@ -986,7 +966,7 @@ def my_hangar_page():
                 key="store_hangar_editor",
             )
         else:
-            st.info("Aucun vaisseau provenant du Store ne correspond à la recherche.")
+            st.info(f"Aucun vaisseau provenant du Store ne correspond à la recherche ('{search_term}').")
             edited_store = pd.DataFrame(columns=columns_for_display)
 
         st.markdown("---")
@@ -1017,12 +997,11 @@ def my_hangar_page():
                 key="ingame_hangar_editor",
             )
         else:
-            st.info("Aucun vaisseau acheté en jeu ne correspond à la recherche.")
+            st.info(f"Aucun vaisseau acheté en jeu ne correspond à la recherche ('{search_term}').")
             edited_ingame = pd.DataFrame(columns=columns_for_display)
 
         # --- SAUVEGARDE GLOBALE DES VAISSEAUX POSSÉDÉS ---
         st.markdown("---")
-        # On concatène les dataframes édités (filtrés) pour s'assurer que seuls les IDs visibles sont envoyés à la sauvegarde
         combined_edited = pd.concat([edited_store, edited_ingame], ignore_index=True)
 
         if st.button(
@@ -1106,7 +1085,13 @@ def render_acquisition_tracking(current_auec_balance, final_target_name):
     # --- AFFICHAGE DE LA PROGRESSION (Calculé à partir des valeurs sauvegardées) ---
     if final_target_name and final_target_name in SHIPS_DB:
         target_info = SHIPS_DB[final_target_name]
-        cost_auec = float(target_info.get('auec_price', 0) or 0)
+        # Utilisation de la valeur réelle stockée dans SHIPS_DB
+        cost_auec_raw = target_info.get('auec_price', 0)
+        
+        try:
+            cost_auec = float(cost_auec_raw)
+        except (ValueError, TypeError):
+            cost_auec = 0 
         
         if cost_auec > 0:
             st.markdown("---")
@@ -1161,9 +1146,8 @@ def corpo_fleet_page():
     df_global["Prix_USD"] = pd.to_numeric(df_global["Prix_USD"], errors="coerce").fillna(
         0
     )
-    df_global["Prix_aUEC"] = pd.to_numeric(
-        df_global["Prix_aUEC"], errors="coerce"
-    ).fillna(0)
+    # Utilisation de la colonne numérique pour les calculs globaux
+    df_global["Prix_aUEC_Num"] = df_global["Prix_aUEC"].apply(lambda x: float(x) if isinstance(x, (int, float)) else 0)
 
     # Joindre le Crew Max à partir de SHIPS_DB (pour les totaux et graphiques)
     def get_ship_info(row, key):
@@ -1178,7 +1162,7 @@ def corpo_fleet_page():
     total_pilots = len(st.session_state.db["users"])
 
     total_value_usd = df_global[df_global["Source"] == "STORE"]["Prix_USD"].sum()
-    total_value_aUEC = df_global[df_global["Source"] == "INGAME"]["Prix_aUEC"].sum()
+    total_value_aUEC = df_global[df_global["Source"] == "INGAME"]["Prix_aUEC_Num"].sum()
 
     st.markdown("---")
 
