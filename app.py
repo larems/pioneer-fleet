@@ -16,7 +16,7 @@ st.set_page_config(
 BACKGROUND_IMAGE = "assets/fondecransite.png"
 
 # --- 2. GESTION DATABASE (JSONBIN.IO) ---
-JSONBIN_ID = st.secrets.get("JSONBIN_ID", "6921f0ded0ea881f40f9433f")
+JSONBIN_ID = st.secrets.get("JSONBIN_ID", "6921f0ded0ea881f40f9933f") # Remplacer par votre ID si différent
 JSONBIN_KEY = st.secrets.get("JSONBIN_KEY", "")
 
 
@@ -27,7 +27,6 @@ def normalize_db_schema(db: dict) -> dict:
     """
     db.setdefault("users", {})
     db.setdefault("fleet", [])
-    # NOUVEAU: Ajout d'une section pour les données spécifiques à l'utilisateur
     db.setdefault("user_data", {}) 
 
     for i, ship in enumerate(db["fleet"]):
@@ -43,13 +42,12 @@ def normalize_db_schema(db: dict) -> dict:
         ship.setdefault("Prix_USD", 0.0)
         ship.setdefault("Prix_aUEC", 0.0)
         ship.setdefault("Assurance", "Standard")
-        ship.setdefault("Prix", None) # S'assurer que l'ancienne colonne est None
+        ship.setdefault("Prix", None)
 
         # --- MIGRATION ANCIEN CHAMP "Prix" -> Prix_USD / Prix_aUEC ---
         legacy_price = ship.get("Prix", None)
         if legacy_price not in (None, "", 0, 0.0):
             try:
-                # Nettoyage dans le cas où le prix est une string avec symbole ou espaces
                 legacy_price_clean = float(
                     str(legacy_price)
                     .replace(" ", "")
@@ -850,7 +848,7 @@ def catalogue_page():
             pilot_data = st.session_state.db.get("user_data", {}).get(st.session_state.current_pilot, {})
             current_auec_balance = pilot_data.get("auec_balance", 0)
             
-            # --- Le champ de solde aUEC est déplacé vers my_hangar_page ---
+            # Afficher le solde pour information, sans champ de saisie
             st.markdown(
                 f"<h4 style='color:#30e8ff;'>Solde aUEC : {current_auec_balance:,.0f}</h4>",
                 unsafe_allow_html=True
@@ -926,30 +924,196 @@ def my_hangar_page():
     """Affiche et permet la modification de la flotte personnelle, séparée par source."""
     st.subheader(f"HANGAR LOGISTIQUE | PILOTE: {st.session_state.current_pilot}")
     st.markdown("---")
-
+    
+    # --- DÉBUT LOGIQUE D'ACQUISITION FUTURE (DÉPLACÉE EN BAS) ---
+    pilot_data = st.session_state.db.get("user_data", {}).get(st.session_state.current_pilot, {})
+    current_auec_balance = pilot_data.get("auec_balance", 0)
+    target_ship_name = pilot_data.get("acquisition_target", None)
+    
+    # Stocker les valeurs actuelles pour les comparer aux entrées du formulaire
+    st.session_state['initial_auec_balance'] = current_auec_balance
+    st.session_state['initial_target_name'] = target_ship_name
+    
+    # --- LISTE DES VAISSEAUX POSSÉDÉS (Affichée en premier) ---
     my_fleet = [
         s
         for s in st.session_state.db["fleet"]
         if s["Propriétaire"] == st.session_state.current_pilot
     ]
 
-    # Récupérer les données utilisateur (y compris le solde aUEC)
-    pilot_data = st.session_state.db.get("user_data", {}).get(st.session_state.current_pilot, {})
-    current_auec_balance = pilot_data.get("auec_balance", 0)
-    target_ship_name = pilot_data.get("acquisition_target", None)
-    
-    # Liste de tous les vaisseaux achetable en aUEC pour le sélecteur cible
-    ingame_ships = sorted([name for name, data in SHIPS_DB.items() if data.get('ingame', False)])
-    ingame_options = ["— Aucun objectif —"] + ingame_ships
-    
-    if target_ship_name in ingame_options:
-        default_index = ingame_options.index(target_ship_name)
+    if not my_fleet:
+        st.info("Hangar vide. Ajoutez des vaisseaux depuis le CATALOGUE.")
     else:
-        default_index = 0
+        df_my = pd.DataFrame(my_fleet)
+        df_my["Supprimer"] = False
 
+        if "Source" not in df_my.columns:
+            st.error(
+                "Données de flotte incomplètes (colonne 'Source' manquante). "
+            )
+            return
+
+        if "id" not in df_my.columns:
+            df_my["id"] = range(1, len(df_my) + 1)
+        df_my["id"] = df_my["id"].astype(int)
+
+        # Conversion des colonnes de prix en numérique
+        df_my["Prix_USD"] = pd.to_numeric(df_my["Prix_USD"], errors="coerce").fillna(0)
+        df_my["Prix_aUEC"] = pd.to_numeric(df_my["Prix_aUEC"], errors="coerce").fillna(0)
+
+        # Colonnes nécessaires mais masquées
+        columns_internal = ["id", "Image", "Propriétaire", "Prix_USD", "Prix_aUEC", "Prix"]
+        
+        # 1. Calcul de la colonne de prix unique pour l'affichage
+        df_my["Prix_Acquisition"] = df_my.apply(
+            lambda row: (
+                f"{row['Prix_aUEC']:,.0f} aUEC"
+                if row["Source"] == "INGAME" and row["Prix_aUEC"] > 0
+                else f"${row['Prix_USD']:,.0f} USD"
+                if row["Source"] == "STORE" and row["Prix_USD"] > 0
+                else "N/A"
+            ),
+            axis=1,
+        )
+
+        # Colonnes visibles dans l'ordre souhaité
+        columns_for_display = [
+            "Vaisseau", 
+            "Marque", 
+            "Rôle", 
+            "Dispo", 
+            "Visuel", 
+            "Source", 
+            "Assurance",
+            "Prix_Acquisition", 
+            "Supprimer"
+        ]
+        
+        # Configuration des colonnes affichées pour n'inclure que la colonne unique de prix
+        editable_columns_base = {
+            "Dispo": st.column_config.CheckboxColumn("OPÉRATIONNEL ?", width="small"),
+            "Supprimer": st.column_config.CheckboxColumn("SUPPRIMER", width="small"),
+            "Visuel": st.column_config.ImageColumn("APERÇU", width="small"),
+            "Source": st.column_config.TextColumn("SOURCE", width="small"), # Rendre Source visible
+            "Assurance": st.column_config.SelectboxColumn(
+                "ASSURANCE",
+                options=["LTI", "10 Ans", "6 Mois", "2 Mois", "Standard"],
+                width="medium",
+            ),
+            # Colonne Prix_Acquisition affichée comme texte pour garder le formatage monétaire unique
+            "Prix_Acquisition": st.column_config.TextColumn("PRIX", width="small"),
+        }
+        
+        # --- HANGAR STORE ---
+        df_store = df_my[df_my["Source"] == "STORE"].reset_index(drop=True).copy()
+        df_store_display = df_store[columns_for_display].copy()
+
+        st.markdown("## 💰 HANGAR STORE (Propriété USD)")
+
+        if not df_store.empty:
+            total_usd = df_store["Prix_USD"].sum()
+            col_usd, col_toggle_usd = st.columns([3, 1])
+            show_usd = col_toggle_usd.toggle(
+                "Afficher Valorisation Totale (USD)", value=False, key="toggle_usd"
+            )
+            col_usd.metric(
+                "VALORISATION STORE", f"${total_usd:,.0f}" if show_usd else "---"
+            )
+            
+            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) 
+
+            edited_store_display = st.data_editor(
+                df_store_display,
+                column_config=editable_columns_base,
+                disabled=[
+                    "Vaisseau",
+                    "Marque",
+                    "Rôle",
+                    "Visuel",
+                    "Source",
+                    "Prix_Acquisition",
+                ],
+                hide_index=True,
+                use_container_width=True,
+                key="store_hangar_editor",
+            )
+            
+            # Conserver les colonnes internes pour la sauvegarde
+            edited_store = edited_store_display.copy()
+            edited_store["id"] = df_store["id"]
+            edited_store["Prix_USD"] = df_store["Prix_USD"]
+            edited_store["Prix_aUEC"] = df_store["Prix_aUEC"]
+            
+        else:
+            st.info("Aucun vaisseau provenant du Store dans votre hangar.")
+            edited_store = pd.DataFrame()
+
+        st.markdown("---")
+
+        # --- HANGAR INGAME ---
+        df_ingame = df_my[df_my["Source"] == "INGAME"].reset_index(drop=True).copy()
+        df_ingame_display = df_ingame[columns_for_display].copy()
+        
+        st.markdown("## 💸 HANGAR INGAME (Acquisition aUEC)")
+
+        if not df_ingame.empty:
+            total_aUEC = df_ingame["Prix_aUEC"].sum()
+            col_aUEC, col_toggle_aUEC = st.columns([3, 1])
+            show_aUEC = col_toggle_aUEC.toggle(
+                "Afficher Coût Total (aUEC)", value=False, key="toggle_aUEC"
+            )
+            col_aUEC.metric(
+                "COÛT ACQUISITION", f"{total_aUEC:,.0f} aUEC" if show_aUEC else "---"
+            )
+            
+            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) 
+
+            edited_ingame_display = st.data_editor(
+                df_ingame_display,
+                column_config=editable_columns_base,
+                disabled=[
+                    "Vaisseau",
+                    "Marque",
+                    "Rôle",
+                    "Visuel",
+                    "Source",
+                    "Prix_Acquisition",
+                ],
+                hide_index=True,
+                use_container_width=True,
+                key="ingame_hangar_editor",
+            )
+            
+            # Conserver les colonnes internes pour la sauvegarde
+            edited_ingame = edited_ingame_display.copy()
+            edited_ingame["id"] = df_ingame["id"]
+            edited_ingame["Prix_USD"] = df_ingame["Prix_USD"]
+            edited_ingame["Prix_aUEC"] = df_ingame["Prix_aUEC"]
+            
+        else:
+            st.info("Aucun vaisseau acheté en jeu dans votre hangar.")
+            edited_ingame = pd.DataFrame()
+
+        # --- SAUVEGARDE GLOBALE DES VAISSEAUX POSSÉDÉS ---
+        st.markdown("---")
+        combined_edited = pd.concat([edited_store, edited_ingame], ignore_index=True)
+
+        if st.button(
+            "💾 ACTUALISER LA FLOTTE (SAUVEGARDER & SUPPRIMER)",
+            type="primary",
+            use_container_width=True,
+        ):
+            if not combined_edited.empty:
+                process_fleet_updates(combined_edited)
+            else:
+                st.info("Aucune modification significative à enregistrer.")
+
+
+    # -------------------------------------------------------------
+    # --- ZONE : SUIVI D'ACQUISITION FUTURE (Déplacée en bas) ---
+    # -------------------------------------------------------------
+    st.markdown("## 🎯 SUIVI D'ACQUISITION FUTURE (aUEC)")
     
-    # --- FORMULAIRE ET SÉLECTEUR D'ACQUISITION FUTURE ---
-    st.markdown("### 🎯 SUIVI D'ACQUISITION FUTURE (aUEC)")
     col_input, col_selector = st.columns([1, 2])
     
     with col_input:
@@ -958,43 +1122,60 @@ def my_hangar_page():
             min_value=0,
             value=int(current_auec_balance),
             step=1000,
-            key="hangar_auec_input",
+            key="hangar_auec_input_form", # Clé différente pour éviter les conflits
             help="Entrez votre solde actuel pour suivre votre progression d'achat."
         )
 
+    # Liste de tous les vaisseaux achetable en aUEC pour le sélecteur cible
+    ingame_ships = sorted([name for name, data in SHIPS_DB.items() if data.get('ingame', False)])
+    ingame_options = ["— Sélectionner un objectif —"] + ingame_ships
+    
+    # Déterminer l'index par défaut pour le selectbox
+    current_target_index = ingame_options.index(target_ship_name) if target_ship_name in ingame_options else 0
+    
     with col_selector:
         selected_target = st.selectbox(
             "🚀 **VAISSEAU CIBLE EN JEU**",
             ingame_options,
-            index=default_index,
-            key="hangar_target_select",
+            index=current_target_index,
+            key="hangar_target_select_form",
         )
         
+    col_save, col_delete = st.columns([1, 1])
     
-    # Logique de mise à jour du solde/cible
-    if st.session_state.hangar_auec_input != current_auec_balance or st.session_state.hangar_target_select != target_ship_name:
-        
-        new_target = selected_target if selected_target != "— Aucun objectif —" else None
+    # Logique de Sauvegarde (Sauvegarder explicitement l'objectif/solde)
+    if col_save.button("💾 ENREGISTRER MON SOLDE / OBJECTIF", type="primary", use_container_width=True):
+        new_target = st.session_state.hangar_target_select_form if st.session_state.hangar_target_select_form != "— Sélectionner un objectif —" else None
         
         st.session_state.db["user_data"].setdefault(st.session_state.current_pilot, {})
         user_data_update = st.session_state.db["user_data"][st.session_state.current_pilot]
         
-        user_data_update["auec_balance"] = new_auec_balance
+        user_data_update["auec_balance"] = st.session_state.hangar_auec_input_form
         user_data_update["acquisition_target"] = new_target
         
         if save_db_to_cloud(st.session_state.db):
-            st.toast("✅ Solde / Objectif mis à jour et sauvegardé.", icon="💰")
+            st.toast("✅ Solde et objectif d'acquisition enregistrés !", icon="🎯")
             st.rerun()
-            
-    # --- AFFICHAGE DE LA PROGRESSION (après mise à jour) ---
-    final_target_name = st.session_state.db["user_data"][st.session_state.current_pilot].get("acquisition_target")
-    final_auec_balance = st.session_state.db["user_data"][st.session_state.current_pilot].get("auec_balance", 0)
+
+    # Logique de Suppression d'Objectif
+    if col_delete.button("🗑️ SUPPRIMER L'OBJECTIF", use_container_width=True):
+        st.session_state.db["user_data"].setdefault(st.session_state.current_pilot, {})
+        user_data_update = st.session_state.db["user_data"][st.session_state.current_pilot]
+        
+        user_data_update["acquisition_target"] = None
+        
+        if save_db_to_cloud(st.session_state.db):
+            st.toast("🗑️ Objectif d'acquisition supprimé.", icon="❌")
+            st.rerun()
+
     
+    # --- AFFICHAGE DE LA PROGRESSION (Calculé à partir des valeurs sauvegardées) ---
     if final_target_name and final_target_name in SHIPS_DB:
         target_info = SHIPS_DB[final_target_name]
         cost_auec = float(target_info.get('auec_price', 0) or 0)
         
         if cost_auec > 0:
+            st.markdown("---")
             st.markdown("#### PROCHAIN OBJECTIF : **" + final_target_name + "**")
             
             progress_ratio = min(1.0, final_auec_balance / cost_auec)
@@ -1022,180 +1203,7 @@ def my_hangar_page():
                 st.warning(f"Il vous manque **{remaining:,.0f} aUEC** pour l'acquisition.")
         else:
             st.info("Le vaisseau cible sélectionné n'a pas de prix en aUEC dans le catalogue.")
-
-    st.markdown("---")
-    # --- FIN SUIVI ACQUISITION FUTURE ---
-    
-    
-    # --- LISTE DES VAISSEAUX POSSÉDÉS ---
-    if not my_fleet:
-        st.info("Hangar vide. Ajoutez des vaisseaux depuis le CATALOGUE.")
-        return
-
-    df_my = pd.DataFrame(my_fleet)
-    df_my["Supprimer"] = False
-
-    if "Source" not in df_my.columns:
-        st.error(
-            "Données de flotte incomplètes (colonne 'Source' manquante). "
-        )
-        return
-
-    if "id" not in df_my.columns:
-        df_my["id"] = range(1, len(df_my) + 1)
-    df_my["id"] = df_my["id"].astype(int)
-
-    # Conversion des colonnes de prix en numérique
-    df_my["Prix_USD"] = pd.to_numeric(df_my["Prix_USD"], errors="coerce").fillna(0)
-    df_my["Prix_aUEC"] = pd.to_numeric(df_my["Prix_aUEC"], errors="coerce").fillna(0)
-
-    # Colonnes nécessaires mais masquées
-    columns_internal = ["id", "Image", "Propriétaire", "Prix_USD", "Prix_aUEC", "Prix"]
-    
-    # 1. Calcul de la colonne de prix unique pour l'affichage
-    df_my["Prix_Acquisition"] = df_my.apply(
-        lambda row: (
-            f"{row['Prix_aUEC']:,.0f} aUEC"
-            if row["Source"] == "INGAME" and row["Prix_aUEC"] > 0
-            else f"${row['Prix_USD']:,.0f} USD"
-            if row["Source"] == "STORE" and row["Prix_USD"] > 0
-            else "N/A"
-        ),
-        axis=1,
-    )
-
-    # Colonnes visibles dans l'ordre souhaité
-    columns_for_display = [
-        "Vaisseau", 
-        "Marque", 
-        "Rôle", 
-        "Dispo", 
-        "Visuel", 
-        "Source", 
-        "Assurance",
-        "Prix_Acquisition", 
-        "Supprimer"
-    ]
-    
-    # Configuration des colonnes affichées pour n'inclure que la colonne unique de prix
-    editable_columns_base = {
-        "Dispo": st.column_config.CheckboxColumn("OPÉRATIONNEL ?", width="small"),
-        "Supprimer": st.column_config.CheckboxColumn("SUPPRIMER", width="small"),
-        "Visuel": st.column_config.ImageColumn("APERÇU", width="small"),
-        "Source": st.column_config.TextColumn("SOURCE", width="small"), # Rendre Source visible
-        "Assurance": st.column_config.SelectboxColumn(
-            "ASSURANCE",
-            options=["LTI", "10 Ans", "6 Mois", "2 Mois", "Standard"],
-            width="medium",
-        ),
-        # Colonne Prix_Acquisition affichée comme texte pour garder le formatage monétaire unique
-        "Prix_Acquisition": st.column_config.TextColumn("PRIX", width="small"),
-    }
-    
-    # --- HANGAR STORE ---
-    df_store = df_my[df_my["Source"] == "STORE"].reset_index(drop=True).copy()
-    df_store_display = df_store[columns_for_display].copy()
-
-    st.markdown("## 💰 HANGAR STORE (Propriété USD)")
-
-    if not df_store.empty:
-        total_usd = df_store["Prix_USD"].sum()
-        col_usd, col_toggle_usd = st.columns([3, 1])
-        show_usd = col_toggle_usd.toggle(
-            "Afficher Valorisation Totale (USD)", value=False, key="toggle_usd"
-        )
-        col_usd.metric(
-            "VALORISATION STORE", f"${total_usd:,.0f}" if show_usd else "---"
-        )
-        
-        st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) 
-
-        edited_store_display = st.data_editor(
-            df_store_display,
-            column_config=editable_columns_base,
-            disabled=[
-                "Vaisseau",
-                "Marque",
-                "Rôle",
-                "Visuel",
-                "Source",
-                "Prix_Acquisition",
-            ],
-            hide_index=True,
-            use_container_width=True,
-            key="store_hangar_editor",
-        )
-        
-        # Conserver les colonnes internes pour la sauvegarde
-        edited_store = edited_store_display.copy()
-        edited_store["id"] = df_store["id"]
-        edited_store["Prix_USD"] = df_store["Prix_USD"]
-        edited_store["Prix_aUEC"] = df_store["Prix_aUEC"]
-        
-    else:
-        st.info("Aucun vaisseau provenant du Store dans votre hangar.")
-        edited_store = pd.DataFrame()
-
-    st.markdown("---")
-
-    # --- HANGAR INGAME ---
-    df_ingame = df_my[df_my["Source"] == "INGAME"].reset_index(drop=True).copy()
-    df_ingame_display = df_ingame[columns_for_display].copy()
-    
-    st.markdown("## 💸 HANGAR INGAME (Acquisition aUEC)")
-
-    if not df_ingame.empty:
-        total_aUEC = df_ingame["Prix_aUEC"].sum()
-        col_aUEC, col_toggle_aUEC = st.columns([3, 1])
-        show_aUEC = col_toggle_aUEC.toggle(
-            "Afficher Coût Total (aUEC)", value=False, key="toggle_aUEC"
-        )
-        col_aUEC.metric(
-            "COÛT ACQUISITION", f"{total_aUEC:,.0f} aUEC" if show_aUEC else "---"
-        )
-        
-        st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) 
-
-        edited_ingame_display = st.data_editor(
-            df_ingame_display,
-            column_config=editable_columns_base,
-            disabled=[
-                "Vaisseau",
-                "Marque",
-                "Rôle",
-                "Visuel",
-                "Source",
-                "Prix_Acquisition",
-            ],
-            hide_index=True,
-            use_container_width=True,
-            key="ingame_hangar_editor",
-        )
-        
-        # Conserver les colonnes internes pour la sauvegarde
-        edited_ingame = edited_ingame_display.copy()
-        edited_ingame["id"] = df_ingame["id"]
-        edited_ingame["Prix_USD"] = df_ingame["Prix_USD"]
-        edited_ingame["Prix_aUEC"] = df_ingame["Prix_aUEC"]
-        
-    else:
-        st.info("Aucun vaisseau acheté en jeu dans votre hangar.")
-        edited_ingame = pd.DataFrame()
-
-    # --- SAUVEGARDE GLOBALE ---
-    st.markdown("---")
-
-    combined_edited = pd.concat([edited_store, edited_ingame], ignore_index=True)
-
-    if st.button(
-        "💾 ACTUALISER LA FLOTTE (SAUVEGARDER & SUPPRIMER)",
-        type="primary",
-        use_container_width=True,
-    ):
-        if not combined_edited.empty:
-            process_fleet_updates(combined_edited)
-        else:
-            st.info("Aucune modification significative à enregistrer.")
+    # --- FIN AFFICHAGE PROGRESSION ---
 
 
 def corpo_fleet_page():
