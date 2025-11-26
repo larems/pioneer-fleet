@@ -295,25 +295,11 @@ def catalogue_page():
                     price_str = f"{pv:,.0f} aUEC" if isinstance(pv, (int, float)) and pv > 0 else "N/A"
                     price_col = "#30e8ff"
 
+                # CORRECTIF HTML : Tout sur une seule ligne pour éviter les erreurs d'indentation
                 badge_html = f"<div style='background:#00d4ff; color:black; font-weight:bold; padding:0 6px; border-radius:4px;'>x{count_in_cart}</div>" if count_in_cart > 0 else ""
+                card_html = f"<div style='background:#041623; border-radius:8px; border:{border}; box-shadow:{shadow}; overflow:hidden; margin-bottom:8px; transition:0.2s;'><div style='height:150px; background:#000;'><img src='{img_b64}' style='width:100%; height:100%; object-fit:cover; opacity:{opacity}'></div><div style='padding:10px;'><div style='display:flex; justify-content:space-between; align-items:center;'><div style='font-weight:bold; color:#fff; font-size:1.1em;'>{name}</div>{badge_html}</div><div style='display:flex; justify-content:space-between; font-size:0.9em; color:#ccc; margin-top:4px;'><span>{data.get('role','N/A')}</span><span style='color:{price_col}; font-weight:bold;'>{price_str}</span></div></div></div>"
                 
-                st.markdown(f"""
-                <div style="background:#041623; border-radius:8px; border:{border}; box-shadow:{shadow}; overflow:hidden; margin-bottom:8px; transition:0.2s;">
-                    <div style="height:150px; background:#000;">
-                        <img src="{img_b64}" style="width:100%; height:100%; object-fit:cover; opacity:{opacity}">
-                    </div>
-                    <div style="padding:10px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <div style="font-weight:bold; color:#fff; font-size:1.1em;">{name}</div>
-                            {badge_html}
-                        </div>
-                        <div style="display:flex; justify-content:space-between; font-size:0.9em; color:#ccc; margin-top:4px;">
-                            <span>{data.get('role','N/A')}</span>
-                            <span style="color:{price_col}; font-weight:bold;">{price_str}</span>
-                        </div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(card_html, unsafe_allow_html=True)
 
                 cb1, cb2 = st.columns(2)
                 with cb1:
@@ -378,68 +364,79 @@ def my_hangar_page():
     tab_fleet, tab_acq = st.tabs(["🚀 MA FLOTTE", "🎯 OBJECTIF D'ACHAT"])
 
     with tab_fleet:
+        # BARRE DE RECHERCHE
+        search_hangar = st.text_input("🔍 Rechercher un vaisseau dans mon hangar...", "")
+
         if my_fleet:
             df = pd.DataFrame(my_fleet)
             
-            # Groupement pour affichage carte (par Vaisseau + Source + Assurance pour éviter les confusions)
-            # On veut afficher "x2" si on a 2 fois le même vaisseau exact
-            grp_fleet = df.groupby(['Vaisseau', 'Source', 'Assurance']).agg({
-                'id': 'count',
-                'Image': 'first' # On prend l'image du premier
-            }).reset_index().rename(columns={'id': 'Quantité'})
+            # FILTRE DE RECHERCHE
+            if search_hangar:
+                m = search_hangar.lower()
+                df = df[df["Vaisseau"].str.lower().str.contains(m) | 
+                        df["Rôle"].str.lower().str.contains(m) | 
+                        df["Source"].str.lower().str.contains(m)]
 
-            # Affichage en grille
-            cols = st.columns(3)
-            for i, row in grp_fleet.iterrows():
-                with cols[i % 3]:
-                    name = row['Vaisseau']
-                    source = row['Source']
-                    insurance = row['Assurance']
-                    count = row['Quantité']
-                    img_path = SHIPS_DB.get(name, {}).get('img', '')
-                    img_b64 = get_local_img_as_base64(img_path)
+            if df.empty:
+                st.info("Aucun vaisseau trouvé avec cette recherche.")
+            else:
+                # Groupement pour affichage carte
+                grp_fleet = df.groupby(['Vaisseau', 'Source', 'Assurance']).agg({
+                    'id': 'count',
+                    'Image': 'first'
+                }).reset_index().rename(columns={'id': 'Quantité'})
 
-                    # Prix Reel
-                    info = SHIPS_DB.get(name, {})
-                    if source == 'STORE':
-                        p_display = f"${info.get('price', 0):,.0f} USD"
-                        p_col = "#00d4ff"
-                    else:
-                        p_display = f"{info.get('auec_price', 0):,.0f} aUEC"
-                        p_col = "#30e8ff"
-                    
-                    st.markdown(f"""
-                    <div class="corpo-card">
-                        <img src="{img_b64}" class="corpo-card-img" style="height:200px;">
-                        <div class="corpo-card-header">
-                            <span class="corpo-card-title">{name}</span>
-                            <span class="corpo-card-count">x{count}</span>
-                        </div>
-                        <div class="corpo-card-body">
-                            <div style="display:flex; justify-content:space-between;">
-                                <span>{source} | {insurance}</span>
-                                <span style="color:{p_col}; font-weight:bold;">{p_display}</span>
+                # Affichage en grille
+                cols = st.columns(3)
+                for i, row in grp_fleet.iterrows():
+                    with cols[i % 3]:
+                        name = row['Vaisseau']
+                        source = row['Source']
+                        insurance = row['Assurance']
+                        count = row['Quantité']
+                        img_path = SHIPS_DB.get(name, {}).get('img', '')
+                        img_b64 = get_local_img_as_base64(img_path)
+
+                        # Prix Reel
+                        info = SHIPS_DB.get(name, {})
+                        if source == 'STORE':
+                            p_display = f"${info.get('price', 0):,.0f} USD"
+                            p_col = "#00d4ff"
+                        else:
+                            p_display = f"{info.get('auec_price', 0):,.0f} aUEC"
+                            p_col = "#30e8ff"
+                        
+                        st.markdown(f"""
+                        <div class="corpo-card">
+                            <img src="{img_b64}" class="corpo-card-img" style="height:200px;">
+                            <div class="corpo-card-header">
+                                <span class="corpo-card-title">{name}</span>
+                                <span class="corpo-card-count">x{count}</span>
+                            </div>
+                            <div class="corpo-card-body">
+                                <div style="display:flex; justify-content:space-between;">
+                                    <span>{source} | {insurance}</span>
+                                    <span style="color:{p_col}; font-weight:bold;">{p_display}</span>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # Bouton Suppression Unitaire
-                    if st.button(f"🗑️ Retirer un {name}", key=f"del_h_{i}"):
-                        # Trouver l'ID d'UN vaisseau correspondant
-                        to_remove_id = None
-                        for s in st.session_state.db["fleet"]:
-                            if (s["Propriétaire"] == st.session_state.current_pilot and 
-                                s["Vaisseau"] == name and 
-                                s["Source"] == source and 
-                                s["Assurance"] == insurance):
-                                to_remove_id = s["id"]
-                                break
+                        """, unsafe_allow_html=True)
                         
-                        if to_remove_id:
-                            st.session_state.db["fleet"] = [s for s in st.session_state.db["fleet"] if s["id"] != to_remove_id]
-                            save_db_to_cloud(st.session_state.db)
-                            st.rerun()
+                        # Bouton Suppression Unitaire
+                        if st.button(f"🗑️ Retirer un {name}", key=f"del_h_{i}"):
+                            to_remove_id = None
+                            for s in st.session_state.db["fleet"]:
+                                if (s["Propriétaire"] == st.session_state.current_pilot and 
+                                    s["Vaisseau"] == name and 
+                                    s["Source"] == source and 
+                                    s["Assurance"] == insurance):
+                                    to_remove_id = s["id"]
+                                    break
+                            
+                            if to_remove_id:
+                                st.session_state.db["fleet"] = [s for s in st.session_state.db["fleet"] if s["id"] != to_remove_id]
+                                save_db_to_cloud(st.session_state.db)
+                                st.rerun()
 
         else:
             st.info("Hangar vide. Allez au catalogue pour ajouter des vaisseaux.")
@@ -451,10 +448,7 @@ def my_hangar_page():
         opts = ["—"] + sorted([n for n, d in SHIPS_DB.items() if d.get('ingame')])
         idx = opts.index(target) if target in opts else 0
         
-        # Selecteur principal
         new_tgt = st.selectbox("Sélectionner le vaisseau cible", opts, index=idx, key="h_target_sel")
-        
-        # Update session state si changement
         current_selection = new_tgt
         
         if "calc_balance" not in st.session_state:
@@ -496,7 +490,6 @@ def my_hangar_page():
                 bal = st.session_state.calc_balance
                 pct = min(1.0, bal/target_cost)
                 
-                # Jauge visuelle custom
                 st.markdown(f"""
                 <div style="background:#163347; border-radius:10px; padding:20px; text-align:center; border:1px solid #00d4ff;">
                     <h2 style="margin:0; color:#fff;">{int(pct*100)}%</h2>
