@@ -188,7 +188,7 @@ def process_fleet_updates(edited_df: pd.DataFrame):
             st.success("✅ Synchronisation terminée")
             time.sleep(0.5); st.rerun()
 
-# --- 4. CSS ---
+# --- 4. CSS (CORRIGÉ : DOUBLE ACCOLADES) ---
 bg_img_code = get_local_img_as_base64(BACKGROUND_IMAGE)
 st.markdown(f"""
 <style>
@@ -204,7 +204,7 @@ p, div, span, label, button {{ font-family: 'Rajdhani', sans-serif !important; }
 ::-webkit-scrollbar-thumb:hover {{ background: #00d4ff; }}
 
 /* Style Cartes Corpo */
-.corpo-card {
+.corpo-card {{
     background: linear-gradient(135deg, rgba(4,20,35,0.95), rgba(0,0,0,0.95));
     border: 1px solid #163347;
     border-radius: 8px;
@@ -212,18 +212,18 @@ p, div, span, label, button {{ font-family: 'Rajdhani', sans-serif !important; }
     overflow: hidden;
     margin-bottom: 10px;
     transition: transform 0.2s;
-}
-.corpo-card:hover { transform: translateY(-3px); border-color: #00d4ff; }
-.corpo-card-img { width: 100%; height: 140px; object-fit: cover; }
-.corpo-card-header { padding: 8px 12px; background: rgba(0,0,0,0.6); border-bottom: 1px solid #123; display:flex; justify-content:space-between; align-items:center; }
-.corpo-card-title { font-family: 'Orbitron'; font-size: 1.1em; color: white; font-weight: bold; }
-.corpo-card-count { background: #00d4ff; color: #000; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-family: 'Orbitron'; }
-.corpo-card-body { padding: 10px 12px; font-size: 0.9em; color: #aaa; }
-.corpo-pilot-tag { display: inline-block; background: #163347; color: #ccc; padding: 2px 6px; border-radius: 3px; margin: 2px; font-size: 0.8em; }
+}}
+.corpo-card:hover {{ transform: translateY(-3px); border-color: #00d4ff; }}
+.corpo-card-img {{ width: 100%; height: 140px; object-fit: cover; }}
+.corpo-card-header {{ padding: 8px 12px; background: rgba(0,0,0,0.6); border-bottom: 1px solid #123; display:flex; justify-content:space-between; align-items:center; }}
+.corpo-card-title {{ font-family: 'Orbitron'; font-size: 1.1em; color: white; font-weight: bold; }}
+.corpo-card-count {{ background: #00d4ff; color: #000; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-family: 'Orbitron'; }}
+.corpo-card-body {{ padding: 10px 12px; font-size: 0.9em; color: #aaa; }}
+.corpo-pilot-tag {{ display: inline-block; background: #163347; color: #ccc; padding: 2px 6px; border-radius: 3px; margin: 2px; font-size: 0.8em; }}
 
 /* Style Flagship */
-.flagship-card { border: 2px solid #ffaa00; box-shadow: 0 0 20px rgba(255, 170, 0, 0.2); }
-.flagship-count { background: #ffaa00; }
+.flagship-card {{ border: 2px solid #ffaa00; box-shadow: 0 0 20px rgba(255, 170, 0, 0.2); }}
+.flagship-count {{ background: #ffaa00; }}
 </style>""", unsafe_allow_html=True)
 
 # --- 5. SESSION STATE ---
@@ -464,8 +464,6 @@ def render_acquisition_tracking(balance, target):
     idx = opts.index(target) if target in opts else 0
     
     # === CORRECTION DU PRIX CIBLE ===
-    # On regarde si l'utilisateur a changé la selection dans le widget
-    # Si oui, on utilise cette valeur pour le calcul immédiat
     current_selection = st.session_state.get("target_selector", opts[idx])
     
     # Sync Slider/Input logic
@@ -497,7 +495,6 @@ def render_acquisition_tracking(balance, target):
 
     with c2:
         st.markdown("**🚀 Vaisseau Cible**")
-        # Ajout de la key pour récupérer la valeur immédiatement
         new_tgt = st.selectbox("Sélection", opts, index=idx, key="target_selector", label_visibility="collapsed")
         
         st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
