@@ -356,6 +356,7 @@ def catalogue_page():
                     price_str = f"{pv:,.0f} aUEC" if isinstance(pv, (int, float)) and pv > 0 else "N/A"
                     price_col = "#30e8ff"
 
+                # Correctif HTML
                 badge_html = f"<div style='background:#00d4ff; color:black; font-weight:bold; padding:0 6px; border-radius:4px;'>x{count_in_cart}</div>" if count_in_cart > 0 else ""
                 card_html = f"<div style='background:#041623; border-radius:8px; border:{border}; box-shadow:{shadow}; overflow:hidden; margin-bottom:8px; transition:0.2s;'><div style='height:150px; background:#000;'><img src='{img_b64}' style='width:100%; height:100%; object-fit:cover; opacity:{opacity}'></div><div style='padding:10px;'><div style='display:flex; justify-content:space-between; align-items:center;'><div style='font-weight:bold; color:#fff; font-size:1.1em;'>{name}</div>{badge_html}</div><div style='display:flex; justify-content:space-between; font-size:0.9em; color:#ccc; margin-top:4px;'><span>{data.get('role','N/A')}</span><span style='color:{price_col}; font-weight:bold;'>{price_str}</span></div></div></div>"
                 
@@ -457,71 +458,100 @@ def my_hangar_page():
             if df.empty:
                 st.info("Aucun vaisseau trouvé avec cette recherche.")
             else:
-                # --- TRI PAR PRIX (USD) ---
-                df['Sort_Price'] = df['Vaisseau'].apply(lambda x: get_current_ship_price(x, 'USD'))
-                df = df.sort_values(by='Sort_Price', ascending=False)
-
-                # Groupement pour affichage carte
-                grp_fleet = df.groupby(['Vaisseau', 'Source', 'Assurance']).agg({
-                    'id': 'count',
-                    'Image': 'first'
-                }).reset_index().rename(columns={'id': 'Quantité'})
+                # --- MISE EN PLACE DE LA SEPARATION (FLAGSHIPS / STANDARD) ---
+                df['is_flagship'] = df['Vaisseau'].apply(check_is_high_value)
                 
-                # Re-Tri du groupement
-                grp_fleet['Sort_Price'] = grp_fleet['Vaisseau'].apply(lambda x: get_current_ship_price(x, 'USD'))
-                grp_fleet = grp_fleet.sort_values(by='Sort_Price', ascending=False)
+                df_flags = df[df['is_flagship'] == True].copy()
+                df_std = df[df['is_flagship'] == False].copy()
 
-                # Affichage en grille
-                cols = st.columns(3)
-                for i, row in grp_fleet.iterrows():
-                    with cols[i % 3]:
-                        name = row['Vaisseau']
-                        source = row['Source']
-                        insurance = row['Assurance']
-                        count = row['Quantité']
-                        img_path = SHIPS_DB.get(name, {}).get('img', '')
-                        img_b64 = get_local_img_as_base64(img_path)
+                # TRI PAR PRIX
+                df_flags['Sort_Price'] = df_flags['Vaisseau'].apply(lambda x: get_current_ship_price(x, 'USD'))
+                df_flags = df_flags.sort_values(by='Sort_Price', ascending=False)
+                
+                df_std['Sort_Price'] = df_std['Vaisseau'].apply(lambda x: get_current_ship_price(x, 'USD'))
+                df_std = df_std.sort_values(by='Sort_Price', ascending=False)
 
-                        # Prix Reel
-                        info = SHIPS_DB.get(name, {})
-                        if source == 'STORE':
-                            p_display = f"${info.get('price', 0):,.0f} USD"
-                            p_col = "#00d4ff"
-                        else:
-                            p_display = f"{info.get('auec_price', 0):,.0f} aUEC"
-                            p_col = "#30e8ff"
-                        
-                        st.markdown(f"""
-                        <div class="corpo-card">
-                            <img src="{img_b64}" class="corpo-card-img" style="height:200px;">
-                            <div class="corpo-card-header">
-                                <span class="corpo-card-title">{name}</span>
-                                <span class="corpo-card-count">x{count}</span>
-                            </div>
-                            <div class="corpo-card-body">
-                                <div style="display:flex; justify-content:space-between;">
-                                    <span>{source} | {insurance}</span>
-                                    <span style="color:{p_col}; font-weight:bold;">{p_display}</span>
+                # FONCTION D'AFFICHAGE COMMUNE
+                def render_fleet_grid(dataframe, is_flagship=False):
+                    if dataframe.empty: return
+                    
+                    # Groupement
+                    grp = dataframe.groupby(['Vaisseau', 'Source', 'Assurance']).agg({
+                        'id': 'count',
+                        'Image': 'first'
+                    }).reset_index().rename(columns={'id': 'Quantité'})
+                    
+                    # Retri du groupe
+                    grp['Sort_Price'] = grp['Vaisseau'].apply(lambda x: get_current_ship_price(x, 'USD'))
+                    grp = grp.sort_values(by='Sort_Price', ascending=False)
+
+                    cols = st.columns(3)
+                    for i, row in grp.iterrows():
+                        with cols[i % 3]:
+                            name = row['Vaisseau']
+                            source = row['Source']
+                            insurance = row['Assurance']
+                            count = row['Quantité']
+                            img_path = SHIPS_DB.get(name, {}).get('img', '')
+                            img_b64 = get_local_img_as_base64(img_path)
+
+                            info = SHIPS_DB.get(name, {})
+                            if source == 'STORE':
+                                p_display = f"${info.get('price', 0):,.0f} USD"
+                                p_col = "#00d4ff"
+                            else:
+                                p_display = f"{info.get('auec_price', 0):,.0f} aUEC"
+                                p_col = "#30e8ff"
+                            
+                            card_class = "corpo-card flagship-card" if is_flagship else "corpo-card"
+                            count_class = "corpo-card-count flagship-count" if is_flagship else "corpo-card-count"
+                            img_style = "height:350px;" if is_flagship else "height:200px;"
+
+                            st.markdown(f"""
+                            <div class="{card_class}">
+                                <img src="{img_b64}" class="corpo-card-img" style="{img_style}">
+                                <div class="corpo-card-header">
+                                    <span class="corpo-card-title">{name}</span>
+                                    <span class="{count_class}">x{count}</span>
+                                </div>
+                                <div class="corpo-card-body">
+                                    <div style="display:flex; justify-content:space-between;">
+                                        <span>{source} | {insurance}</span>
+                                        <span style="color:{p_col}; font-weight:bold;">{p_display}</span>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        
-                        # Bouton Suppression Unitaire
-                        if st.button(f"🗑️ Retirer un {name}", key=f"del_h_{i}"):
-                            to_remove_id = None
-                            for s in st.session_state.db["fleet"]:
-                                if (s["Propriétaire"] == st.session_state.current_pilot and 
-                                    s["Vaisseau"] == name and 
-                                    s["Source"] == source and 
-                                    s["Assurance"] == insurance):
-                                    to_remove_id = s["id"]
-                                    break
+                            """, unsafe_allow_html=True)
                             
-                            if to_remove_id:
-                                st.session_state.db["fleet"] = [s for s in st.session_state.db["fleet"] if s["id"] != to_remove_id]
-                                save_db_to_cloud(st.session_state.db)
-                                st.rerun()
+                            if st.button(f"🗑️ Retirer un {name}", key=f"del_h_{i}_{name}_{source}"):
+                                to_remove_id = None
+                                for s in st.session_state.db["fleet"]:
+                                    if (s["Propriétaire"] == st.session_state.current_pilot and 
+                                        s["Vaisseau"] == name and 
+                                        s["Source"] == source and 
+                                        s["Assurance"] == insurance):
+                                        to_remove_id = s["id"]
+                                        break
+                                if to_remove_id:
+                                    st.session_state.db["fleet"] = [s for s in st.session_state.db["fleet"] if s["id"] != to_remove_id]
+                                    save_db_to_cloud(st.session_state.db)
+                                    st.rerun()
+
+                # AFFICHAGE SECTION FLAGSHIPS
+                if not df_flags.empty:
+                    st.markdown("""
+                    <div style="text-align:center; margin: 30px 0 10px 0;">
+                        <div style="font-size: 30px; color: #ffaa00; margin-bottom: -10px;">▼</div>
+                        <h2 style="color: #ffaa00; border-bottom: 2px solid #ffaa00; display: inline-block; padding: 0 20px 10px 20px;">
+                            FLOTTE AMIRALE & HAUTE VALEUR
+                        </h2>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    render_fleet_grid(df_flags, is_flagship=True)
+
+                # AFFICHAGE SECTION STANDARD
+                st.markdown("### 🚀 FLOTTE STANDARD")
+                render_fleet_grid(df_std, is_flagship=False)
 
         else:
             st.info("Hangar vide. Allez au catalogue pour ajouter des vaisseaux.")
@@ -620,7 +650,7 @@ def corpo_fleet_page():
     <div style="text-align:center; margin: 30px 0 10px 0;">
         <div style="font-size: 30px; color: #ffaa00; margin-bottom: -10px;">▼</div>
         <h2 style="color: #ffaa00; border-bottom: 2px solid #ffaa00; display: inline-block; padding: 0 20px 10px 20px;">
-            FLOTTE AMIRALE & HAUTE VALEUR (> 800$)
+            FLOTTE AMIRALE & HAUTE VALEUR
         </h2>
     </div>
     """, unsafe_allow_html=True)
