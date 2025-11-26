@@ -121,6 +121,27 @@ def check_is_high_value(ship_name):
         return True
     return False
 
+def update_ship_attributes(pilot, ship_name, source, old_insurance, old_dispo, new_insurance, new_dispo):
+    """Met à jour l'assurance et la disponibilité d'un groupe de vaisseaux."""
+    updated = False
+    for s in st.session_state.db["fleet"]:
+        # On cherche les vaisseaux qui correspondent aux anciens critères pour les mettre à jour
+        if (s["Propriétaire"] == pilot and 
+            s["Vaisseau"] == ship_name and 
+            s["Source"] == source and 
+            s["Assurance"] == old_insurance and
+            s["Dispo"] == old_dispo):
+            
+            s["Assurance"] = new_insurance
+            s["Dispo"] = bool(new_dispo)
+            updated = True
+    
+    if updated:
+        save_db_to_cloud(st.session_state.db)
+        st.toast("Vaisseau mis à jour !", icon="✅")
+        time.sleep(0.5)
+        st.rerun()
+
 def submit_cart_batch():
     if not st.session_state.current_pilot:
         st.error("Vous devez être connecté.")
@@ -170,34 +191,6 @@ def submit_cart_batch():
         time.sleep(1)
         st.rerun()
 
-def process_fleet_updates(edited_df: pd.DataFrame):
-    if edited_df.empty: return
-    current_fleet = st.session_state.db["fleet"]
-    needs_save = False
-
-    if "Supprimer" in edited_df.columns:
-        ids_to_del = edited_df[edited_df["Supprimer"] == True]["id"].tolist()
-        if ids_to_del:
-            st.session_state.db["fleet"] = [s for s in current_fleet if s.get("id") not in ids_to_del]
-            needs_save = True
-
-    update_map = edited_df.set_index("id")[["Dispo", "Assurance"]].to_dict("index")
-    for ship in st.session_state.db["fleet"]:
-        sid = ship.get("id")
-        if sid in update_map:
-            row = update_map[sid]
-            if ship["Dispo"] != bool(row["Dispo"]):
-                ship["Dispo"] = bool(row["Dispo"])
-                needs_save = True
-            if ship.get("Assurance") != row["Assurance"]:
-                ship["Assurance"] = row["Assurance"]
-                needs_save = True
-
-    if needs_save:
-        if save_db_to_cloud(st.session_state.db):
-            st.success("✅ Synchronisation terminée")
-            time.sleep(0.5); st.rerun()
-
 # --- 4. CSS (Styles Ajustés) ---
 bg_img_code = get_local_img_as_base64(BACKGROUND_IMAGE)
 st.markdown(f"""
@@ -220,7 +213,7 @@ p, div, span, label, button {{ font-family: 'Rajdhani', sans-serif !important; }
     border-radius: 12px;
     padding: 0;
     overflow: hidden;
-    margin-bottom: 20px;
+    margin-bottom: 10px;
     transition: transform 0.2s, box-shadow 0.2s;
 }}
 .corpo-card:hover {{ transform: translateY(-4px); border-color: #00d4ff; box-shadow: 0 0 15px rgba(0, 212, 255, 0.15); }}
@@ -246,6 +239,12 @@ div[data-testid="stTextInput"] input {{
 div[data-testid="stTextInput"] input:focus {{
     border-color: #00d4ff;
     box-shadow: 0 0 10px rgba(0,212,255,0.3);
+}}
+
+/* CUSTOM SELECTBOX IN CARDS */
+div[data-testid="stSelectbox"] > div > div {{
+    background-color: rgba(0,0,0,0.5);
+    border: 1px solid #333;
 }}
 </style>""", unsafe_allow_html=True)
 
@@ -299,6 +298,7 @@ def home_page():
 def catalogue_page():
     col_filters, col_main, col_cart = st.columns([1, 3.5, 1.5])
     
+    # --- 1. FILTRES (GAUCHE) ---
     with col_filters:
         st.subheader("PARAMÈTRES")
         p_source = st.radio("SOURCE", ["STORE", "INGAME"], index=0 if st.session_state.selected_source == "STORE" else 1)
@@ -309,21 +309,28 @@ def catalogue_page():
         st.markdown("---")
         brands = ["Tous"] + sorted(list(set(d.get("brand") for d in SHIPS_DB.values() if d.get("brand"))))
         f_brand = st.selectbox("CONSTRUCTEUR", brands)
-        search = st.multiselect("RECHERCHE", sorted(list(SHIPS_DB.keys())))
-
-    filtered = {}
-    for name, data in SHIPS_DB.items():
-        if f_brand != "Tous" and data.get("brand") != f_brand: continue
-        if search and name not in search: continue
-        filtered[name] = data
-
-    items = list(filtered.items())
-    PER_PAGE = 8
-    total_pages = max(1, (len(items) + PER_PAGE - 1) // PER_PAGE)
-    if st.session_state.catalog_page >= total_pages: st.session_state.catalog_page = 0
-    
+        
+    # --- 2. ZONE CENTRALE ---
     with col_main:
         st.subheader(f"REGISTRE ({len(st.session_state.cart)} SÉLECTIONNÉS)")
+        
+        # BARRE DE RECHERCHE CENTRALE (PLACÉE ICI COMME DEMANDÉ)
+        search_list = sorted(list(SHIPS_DB.keys()))
+        search = st.multiselect("RECHERCHE", search_list, placeholder="🔍 Rechercher un vaisseau...", label_visibility="collapsed")
+
+        # LOGIQUE DE FILTRAGE
+        filtered = {}
+        for name, data in SHIPS_DB.items():
+            if f_brand != "Tous" and data.get("brand") != f_brand: continue
+            if search and name not in search: continue
+            filtered[name] = data
+
+        items = list(filtered.items())
+        PER_PAGE = 8
+        total_pages = max(1, (len(items) + PER_PAGE - 1) // PER_PAGE)
+        if st.session_state.catalog_page >= total_pages: st.session_state.catalog_page = 0
+
+        # PAGINATION
         c1, c2, c3 = st.columns([1, 4, 1])
         with c1: 
             if st.button("◄", disabled=(st.session_state.catalog_page==0)): st.session_state.catalog_page -= 1; st.rerun()
@@ -336,6 +343,7 @@ def catalogue_page():
         
         if not current_batch: st.info("Aucun vaisseau.")
         
+        # GRILLE D'AFFICHAGE
         cols = st.columns(2)
         for i, (name, data) in enumerate(current_batch):
             with cols[i % 2]:
@@ -356,7 +364,7 @@ def catalogue_page():
                     price_str = f"{pv:,.0f} aUEC" if isinstance(pv, (int, float)) and pv > 0 else "N/A"
                     price_col = "#30e8ff"
 
-                # Correctif HTML
+                # HTML Card Compact
                 badge_html = f"<div style='background:#00d4ff; color:black; font-weight:bold; padding:0 6px; border-radius:4px;'>x{count_in_cart}</div>" if count_in_cart > 0 else ""
                 card_html = f"<div style='background:#041623; border-radius:8px; border:{border}; box-shadow:{shadow}; overflow:hidden; margin-bottom:8px; transition:0.2s;'><div style='height:150px; background:#000;'><img src='{img_b64}' style='width:100%; height:100%; object-fit:cover; opacity:{opacity}'></div><div style='padding:10px;'><div style='display:flex; justify-content:space-between; align-items:center;'><div style='font-weight:bold; color:#fff; font-size:1.1em;'>{name}</div>{badge_html}</div><div style='display:flex; justify-content:space-between; font-size:0.9em; color:#ccc; margin-top:4px;'><span>{data.get('role','N/A')}</span><span style='color:{price_col}; font-weight:bold;'>{price_str}</span></div></div></div>"
                 
@@ -425,7 +433,7 @@ def my_hangar_page():
     tab_fleet, tab_acq = st.tabs(["🚀 MA FLOTTE", "🎯 OBJECTIF D'ACHAT"])
 
     with tab_fleet:
-        # BARRE DE RECHERCHE
+        # BARRE DE RECHERCHE HANGAR
         search_hangar = st.text_input("🔍 Rechercher un vaisseau dans mon hangar...", "")
 
         if my_fleet:
@@ -441,7 +449,6 @@ def my_hangar_page():
                 elif row['Source'] == 'INGAME':
                     total_auec_personal += get_current_ship_price(row['Vaisseau'], 'aUEC')
 
-            # AFFICHER LES TOTAUX
             col_m1, col_m2, col_m3 = st.columns(3)
             col_m1.metric("VALEUR PLEDGE (USD)", f"${total_usd_personal:,.0f}")
             col_m2.metric("VALEUR IN-GAME (aUEC)", f"{total_auec_personal:,.0f}")
@@ -458,30 +465,30 @@ def my_hangar_page():
             if df.empty:
                 st.info("Aucun vaisseau trouvé avec cette recherche.")
             else:
-                # --- MISE EN PLACE DE LA SEPARATION (FLAGSHIPS / STANDARD) ---
+                # --- SEPARATION (FLAGSHIPS / STANDARD) + TRI PAR PRIX ---
                 df['is_flagship'] = df['Vaisseau'].apply(check_is_high_value)
                 
                 df_flags = df[df['is_flagship'] == True].copy()
                 df_std = df[df['is_flagship'] == False].copy()
 
-                # TRI PAR PRIX
                 df_flags['Sort_Price'] = df_flags['Vaisseau'].apply(lambda x: get_current_ship_price(x, 'USD'))
                 df_flags = df_flags.sort_values(by='Sort_Price', ascending=False)
                 
                 df_std['Sort_Price'] = df_std['Vaisseau'].apply(lambda x: get_current_ship_price(x, 'USD'))
                 df_std = df_std.sort_values(by='Sort_Price', ascending=False)
 
-                # FONCTION D'AFFICHAGE COMMUNE
-                def render_fleet_grid(dataframe, is_flagship=False):
+                # FONCTION D'AFFICHAGE AVEC MODIFICATION
+                def render_fleet_grid_editable(dataframe, is_flagship=False):
                     if dataframe.empty: return
                     
-                    # Groupement
-                    grp = dataframe.groupby(['Vaisseau', 'Source', 'Assurance']).agg({
+                    # Groupement pour l'affichage (On groupe aussi par Dispo pour permettre la gestion unitaire si besoin,
+                    # ou on groupe juste par type et on gère la dispo globale). 
+                    # ICI: On groupe par (Vaisseau, Source, Assurance, Dispo) pour avoir des piles cohérentes
+                    grp = dataframe.groupby(['Vaisseau', 'Source', 'Assurance', 'Dispo']).agg({
                         'id': 'count',
                         'Image': 'first'
                     }).reset_index().rename(columns={'id': 'Quantité'})
                     
-                    # Retri du groupe
                     grp['Sort_Price'] = grp['Vaisseau'].apply(lambda x: get_current_ship_price(x, 'USD'))
                     grp = grp.sort_values(by='Sort_Price', ascending=False)
 
@@ -491,6 +498,7 @@ def my_hangar_page():
                             name = row['Vaisseau']
                             source = row['Source']
                             insurance = row['Assurance']
+                            dispo = row['Dispo']
                             count = row['Quantité']
                             img_path = SHIPS_DB.get(name, {}).get('img', '')
                             img_b64 = get_local_img_as_base64(img_path)
@@ -507,6 +515,7 @@ def my_hangar_page():
                             count_class = "corpo-card-count flagship-count" if is_flagship else "corpo-card-count"
                             img_style = "height:350px;" if is_flagship else "height:200px;"
 
+                            # 1. CARTE VISUELLE
                             st.markdown(f"""
                             <div class="{card_class}">
                                 <img src="{img_b64}" class="corpo-card-img" style="{img_style}">
@@ -516,28 +525,47 @@ def my_hangar_page():
                                 </div>
                                 <div class="corpo-card-body">
                                     <div style="display:flex; justify-content:space-between;">
-                                        <span>{source} | {insurance}</span>
+                                        <span>{source}</span>
                                         <span style="color:{p_col}; font-weight:bold;">{p_display}</span>
                                     </div>
                                 </div>
                             </div>
                             """, unsafe_allow_html=True)
                             
-                            if st.button(f"🗑️ Retirer un {name}", key=f"del_h_{i}_{name}_{source}"):
-                                to_remove_id = None
-                                for s in st.session_state.db["fleet"]:
-                                    if (s["Propriétaire"] == st.session_state.current_pilot and 
-                                        s["Vaisseau"] == name and 
-                                        s["Source"] == source and 
-                                        s["Assurance"] == insurance):
-                                        to_remove_id = s["id"]
-                                        break
-                                if to_remove_id:
-                                    st.session_state.db["fleet"] = [s for s in st.session_state.db["fleet"] if s["id"] != to_remove_id]
-                                    save_db_to_cloud(st.session_state.db)
-                                    st.rerun()
+                            # 2. CONTROLES DE GESTION SOUS LA CARTE
+                            c_edit, c_del = st.columns([3, 1])
+                            
+                            with c_edit:
+                                # Sélecteur d'Assurance
+                                ins_opts = ["LTI", "10 Ans", "2 ans", "6 Mois", "2 Mois", "Standard"]
+                                new_ins = st.selectbox("Assurance", ins_opts, index=ins_opts.index(insurance) if insurance in ins_opts else 5, key=f"ins_{i}_{name}_{source}_{dispo}", label_visibility="collapsed")
+                                
+                                # Toggle Dispo
+                                new_disp = st.toggle("Disponibilité (Prêt)", value=dispo, key=f"disp_{i}_{name}_{source}_{insurance}")
 
-                # AFFICHAGE SECTION FLAGSHIPS
+                                # LOGIQUE DE MISE A JOUR
+                                # Si l'un des deux change, on update la DB
+                                if new_ins != insurance or new_disp != dispo:
+                                    update_ship_attributes(st.session_state.current_pilot, name, source, insurance, dispo, new_ins, new_disp)
+
+                            with c_del:
+                                if st.button("🗑️", key=f"del_{i}_{name}_{source}_{dispo}", help="Retirer un exemplaire"):
+                                    # Logique de suppression unitaire
+                                    to_remove_id = None
+                                    for s in st.session_state.db["fleet"]:
+                                        if (s["Propriétaire"] == st.session_state.current_pilot and 
+                                            s["Vaisseau"] == name and 
+                                            s["Source"] == source and 
+                                            s["Assurance"] == insurance and
+                                            s["Dispo"] == dispo):
+                                            to_remove_id = s["id"]
+                                            break
+                                    if to_remove_id:
+                                        st.session_state.db["fleet"] = [s for s in st.session_state.db["fleet"] if s["id"] != to_remove_id]
+                                        save_db_to_cloud(st.session_state.db)
+                                        st.rerun()
+
+                # AFFICHAGE
                 if not df_flags.empty:
                     st.markdown("""
                     <div style="text-align:center; margin: 30px 0 10px 0;">
@@ -547,11 +575,10 @@ def my_hangar_page():
                         </h2>
                     </div>
                     """, unsafe_allow_html=True)
-                    render_fleet_grid(df_flags, is_flagship=True)
+                    render_fleet_grid_editable(df_flags, is_flagship=True)
 
-                # AFFICHAGE SECTION STANDARD
                 st.markdown("### 🚀 FLOTTE STANDARD")
-                render_fleet_grid(df_std, is_flagship=False)
+                render_fleet_grid_editable(df_std, is_flagship=False)
 
         else:
             st.info("Hangar vide. Allez au catalogue pour ajouter des vaisseaux.")
@@ -655,8 +682,7 @@ def corpo_fleet_page():
     </div>
     """, unsafe_allow_html=True)
     
-    # FILTRE : Liste manuelle OU prix >= 800
-    # On crée une colonne temporaire pour le filtre
+    # FILTRE
     df['is_flagship'] = df['Vaisseau'].apply(check_is_high_value)
     
     df_flagships = df[df['is_flagship'] == True]
@@ -729,7 +755,6 @@ def corpo_fleet_page():
     st.markdown("---")
     st.markdown("### 📋 DÉTAIL GLOBAL")
     
-    # Recherche plus propre
     c_search, c_void = st.columns([2, 1])
     with c_search:
         search = st.text_input("🔍 Filtrer la liste globale (Vaisseau, Pilote, Rôle)", "")
@@ -740,7 +765,6 @@ def corpo_fleet_page():
                 df["Propriétaire"].str.lower().str.contains(m) | 
                 df["Rôle"].str.lower().str.contains(m)]
 
-    # Tableau détaillé
     grp = df.groupby(['Vaisseau', 'Source', 'Rôle']).agg({
         'Propriétaire': lambda x: ', '.join(sorted(x.unique())),
         'id': 'count',
