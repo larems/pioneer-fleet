@@ -149,35 +149,7 @@ def submit_cart_batch():
         time.sleep(1)
         st.rerun()
 
-def process_fleet_updates(edited_df: pd.DataFrame):
-    if edited_df.empty: return
-    current_fleet = st.session_state.db["fleet"]
-    needs_save = False
-
-    if "Supprimer" in edited_df.columns:
-        ids_to_del = edited_df[edited_df["Supprimer"] == True]["id"].tolist()
-        if ids_to_del:
-            st.session_state.db["fleet"] = [s for s in current_fleet if s.get("id") not in ids_to_del]
-            needs_save = True
-
-    update_map = edited_df.set_index("id")[["Dispo", "Assurance"]].to_dict("index")
-    for ship in st.session_state.db["fleet"]:
-        sid = ship.get("id")
-        if sid in update_map:
-            row = update_map[sid]
-            if ship["Dispo"] != bool(row["Dispo"]):
-                ship["Dispo"] = bool(row["Dispo"])
-                needs_save = True
-            if ship.get("Assurance") != row["Assurance"]:
-                ship["Assurance"] = row["Assurance"]
-                needs_save = True
-
-    if needs_save:
-        if save_db_to_cloud(st.session_state.db):
-            st.success("✅ Synchronisation terminée")
-            time.sleep(0.5); st.rerun()
-
-# --- 4. CSS (Style Clean) ---
+# --- 4. CSS (Styles Ajustés) ---
 bg_img_code = get_local_img_as_base64(BACKGROUND_IMAGE)
 st.markdown(f"""
 <style>
@@ -323,19 +295,26 @@ def catalogue_page():
                     price_str = f"{pv:,.0f} aUEC" if isinstance(pv, (int, float)) and pv > 0 else "N/A"
                     price_col = "#30e8ff"
 
-                # CORRECTION HTML : Code simplifié sans indentations complexes
                 badge_html = f"<div style='background:#00d4ff; color:black; font-weight:bold; padding:0 6px; border-radius:4px;'>x{count_in_cart}</div>" if count_in_cart > 0 else ""
                 
-                card_html = f"""<div style="background:#041623; border-radius:8px; border:{border}; box-shadow:{shadow}; overflow:hidden; margin-bottom:8px; transition:0.2s;">
-<div style="height:150px; background:#000;"><img src="{img_b64}" style="width:100%; height:100%; object-fit:cover; opacity:{opacity}"></div>
-<div style="padding:10px;">
-<div style="display:flex; justify-content:space-between; align-items:center;"><div style="font-weight:bold; color:#fff; font-size:1.1em;">{name}</div>{badge_html}</div>
-<div style="display:flex; justify-content:space-between; font-size:0.9em; color:#ccc; margin-top:4px;"><span>{data.get('role','N/A')}</span><span style="color:{price_col}; font-weight:bold;">{price_str}</span></div>
-</div></div>"""
-                
-                st.markdown(card_html, unsafe_allow_html=True)
+                st.markdown(f"""
+                <div style="background:#041623; border-radius:8px; border:{border}; box-shadow:{shadow}; overflow:hidden; margin-bottom:8px; transition:0.2s;">
+                    <div style="height:150px; background:#000;">
+                        <img src="{img_b64}" style="width:100%; height:100%; object-fit:cover; opacity:{opacity}">
+                    </div>
+                    <div style="padding:10px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div style="font-weight:bold; color:#fff; font-size:1.1em;">{name}</div>
+                            {badge_html}
+                        </div>
+                        <div style="display:flex; justify-content:space-between; font-size:0.9em; color:#ccc; margin-top:4px;">
+                            <span>{data.get('role','N/A')}</span>
+                            <span style="color:{price_col}; font-weight:bold;">{price_str}</span>
+                        </div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
 
-                # BOUTONS
                 cb1, cb2 = st.columns(2)
                 with cb1:
                     if st.button(f"➖", key=f"min_{name}", use_container_width=True):
@@ -388,122 +367,152 @@ def catalogue_page():
 
 def my_hangar_page():
     st.subheader(f"HANGAR LOGISTIQUE | {st.session_state.current_pilot}")
+    
+    # CHARGEMENT DONNEES
     pilot_data = st.session_state.db.get("user_data", {}).get(st.session_state.current_pilot, {})
     current_auec = pilot_data.get("auec_balance", 0)
     target = pilot_data.get("acquisition_target", None)
-
     my_fleet = [s for s in st.session_state.db["fleet"] if s["Propriétaire"] == st.session_state.current_pilot]
-    
-    if my_fleet:
-        df = pd.DataFrame(my_fleet)
-        df["Supprimer"] = False
-        df['Visuel'] = df['Image'].apply(get_local_img_as_base64)
 
-        # === CORRECTION DES PRIX (Fix) ===
-        # Lecture temps réel du catalogue pour affichage
-        def refresh_price_val(row):
-            info = SHIPS_DB.get(row['Vaisseau'], {})
-            if row['Source'] == 'STORE':
-                p = info.get('price', 0)
-                return f"${p:,.0f}" if p else "N/A"
-            else:
-                p = info.get('auec_price', 0)
-                return f"{p:,.0f} aUEC" if isinstance(p, (int, float)) else "N/A"
+    # --- ONGLET 1 : MA FLOTTE VISUELLE ---
+    tab_fleet, tab_acq = st.tabs(["🚀 MA FLOTTE", "🎯 OBJECTIF D'ACHAT"])
+
+    with tab_fleet:
+        if my_fleet:
+            df = pd.DataFrame(my_fleet)
+            
+            # Groupement pour affichage carte (par Vaisseau + Source + Assurance pour éviter les confusions)
+            # On veut afficher "x2" si on a 2 fois le même vaisseau exact
+            grp_fleet = df.groupby(['Vaisseau', 'Source', 'Assurance']).agg({
+                'id': 'count',
+                'Image': 'first' # On prend l'image du premier
+            }).reset_index().rename(columns={'id': 'Quantité'})
+
+            # Affichage en grille
+            cols = st.columns(3)
+            for i, row in grp_fleet.iterrows():
+                with cols[i % 3]:
+                    name = row['Vaisseau']
+                    source = row['Source']
+                    insurance = row['Assurance']
+                    count = row['Quantité']
+                    img_path = SHIPS_DB.get(name, {}).get('img', '')
+                    img_b64 = get_local_img_as_base64(img_path)
+
+                    # Prix Reel
+                    info = SHIPS_DB.get(name, {})
+                    if source == 'STORE':
+                        p_display = f"${info.get('price', 0):,.0f} USD"
+                        p_col = "#00d4ff"
+                    else:
+                        p_display = f"{info.get('auec_price', 0):,.0f} aUEC"
+                        p_col = "#30e8ff"
+                    
+                    st.markdown(f"""
+                    <div class="corpo-card">
+                        <img src="{img_b64}" class="corpo-card-img" style="height:200px;">
+                        <div class="corpo-card-header">
+                            <span class="corpo-card-title">{name}</span>
+                            <span class="corpo-card-count">x{count}</span>
+                        </div>
+                        <div class="corpo-card-body">
+                            <div style="display:flex; justify-content:space-between;">
+                                <span>{source} | {insurance}</span>
+                                <span style="color:{p_col}; font-weight:bold;">{p_display}</span>
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Bouton Suppression Unitaire
+                    if st.button(f"🗑️ Retirer un {name}", key=f"del_h_{i}"):
+                        # Trouver l'ID d'UN vaisseau correspondant
+                        to_remove_id = None
+                        for s in st.session_state.db["fleet"]:
+                            if (s["Propriétaire"] == st.session_state.current_pilot and 
+                                s["Vaisseau"] == name and 
+                                s["Source"] == source and 
+                                s["Assurance"] == insurance):
+                                to_remove_id = s["id"]
+                                break
+                        
+                        if to_remove_id:
+                            st.session_state.db["fleet"] = [s for s in st.session_state.db["fleet"] if s["id"] != to_remove_id]
+                            save_db_to_cloud(st.session_state.db)
+                            st.rerun()
+
+        else:
+            st.info("Hangar vide. Allez au catalogue pour ajouter des vaisseaux.")
+
+    # --- ONGLET 2 : ACQUISITION ---
+    with tab_acq:
+        st.markdown("### 🎯 CALCULATEUR D'OBJECTIF")
         
-        df["Valeur_Actuelle"] = df.apply(refresh_price_val, axis=1)
+        opts = ["—"] + sorted([n for n, d in SHIPS_DB.items() if d.get('ingame')])
+        idx = opts.index(target) if target in opts else 0
+        
+        # Selecteur principal
+        new_tgt = st.selectbox("Sélectionner le vaisseau cible", opts, index=idx, key="h_target_sel")
+        
+        # Update session state si changement
+        current_selection = new_tgt
+        
+        if "calc_balance" not in st.session_state:
+            st.session_state.calc_balance = int(current_auec)
 
-        col_cfg = {
-            "id": st.column_config.NumberColumn("ID", disabled=True),
-            "Visuel": st.column_config.ImageColumn("Aperçu", width="small"),
-            "Dispo": st.column_config.CheckboxColumn("Prêt ?"),
-            "Supprimer": st.column_config.CheckboxColumn("Suppr."),
-            "Source": st.column_config.TextColumn("Source", disabled=True),
-            "Assurance": st.column_config.SelectboxColumn("Assurance", options=["LTI", "10 Ans", "Standard"], width="medium"),
-            "Valeur_Actuelle": st.column_config.TextColumn("Valeur (Cat.)", disabled=True),
-            "Vaisseau": st.column_config.TextColumn("Vaisseau", disabled=True, width="medium"),
-            "Rôle": st.column_config.TextColumn("Rôle", disabled=True)
-        }
-        visible_cols = ["Visuel", "Vaisseau", "Rôle", "Source", "Assurance", "Valeur_Actuelle", "Dispo", "Supprimer", "id"]
+        def update_balance_slider():
+            st.session_state.calc_balance = st.session_state.h_slider
+        def update_balance_num():
+            st.session_state.calc_balance = st.session_state.h_num
 
-        df_store = df[df["Source"]=="STORE"].copy()
-        df_game = df[df["Source"]=="INGAME"].copy()
-
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Vaisseaux Store", len(df_store))
-        m2.metric("Vaisseaux InGame", len(df_game))
-        m3.metric("Total Flotte", len(df))
-        st.markdown("---")
-
-        if not df_store.empty:
-            st.markdown("#### 💰 STORE (Pledge)")
-            edit_store = st.data_editor(df_store[visible_cols], column_config=col_cfg, use_container_width=True, hide_index=True, key="ed_store")
-        else:
-            edit_store = pd.DataFrame()
-
-        if not df_game.empty:
-            st.markdown("#### 💸 INGAME (aUEC)")
-            edit_game = st.data_editor(df_game[visible_cols], column_config=col_cfg, use_container_width=True, hide_index=True, key="ed_game")
-        else:
-            edit_game = pd.DataFrame()
-
-        st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
-        if st.button("💾 SAUVEGARDER MODIFICATIONS", type="primary", use_container_width=True):
-            full_edit = pd.concat([edit_store, edit_game], ignore_index=True)
-            process_fleet_updates(full_edit)
-    else:
-        st.info("Votre hangar est vide.")
-
-    render_acquisition_tracking(current_auec, target)
-
-def render_acquisition_tracking(balance, target):
-    st.markdown("---")
-    st.markdown("### 🎯 OBJECTIF DU PILOTE")
-    
-    opts = ["—"] + sorted([n for n, d in SHIPS_DB.items() if d.get('ingame')])
-    idx = opts.index(target) if target in opts else 0
-    
-    current_selection = st.session_state.get("target_selector", opts[idx])
-    
-    if "calc_balance" not in st.session_state:
-        st.session_state.calc_balance = int(balance)
-
-    def update_balance_slider():
-        st.session_state.calc_balance = st.session_state.widget_slider
-    def update_balance_num():
-        st.session_state.calc_balance = st.session_state.widget_num
-
-    c1, c2 = st.columns([1, 1.5])
-    
-    with c1:
-        st.markdown("**💰 Mon Solde aUEC**")
-        slider_max = 100_000_000
+        c1, c2 = st.columns([1, 2])
+        
         target_cost = 0
         if current_selection != "—" and current_selection in SHIPS_DB:
             t_price = SHIPS_DB[current_selection].get('auec_price', 0)
             if isinstance(t_price, (int, float)) and t_price > 0:
-                slider_max = int(t_price * 1.5)
                 target_cost = t_price
+        
+        slider_max = max(100_000, int(target_cost * 1.2)) if target_cost > 0 else 10_000_000
 
-        st.slider("Jauge", 0, slider_max, key="widget_slider", on_change=update_balance_slider, label_visibility="collapsed")
-        st.number_input("Montant", value=st.session_state.calc_balance, step=10000, key="widget_num", on_change=update_balance_num, label_visibility="collapsed")
+        with c1:
+            st.markdown(f"**💰 Mon Solde Actuel**")
+            st.number_input("Montant", value=st.session_state.calc_balance, step=10000, key="h_num", on_change=update_balance_num, label_visibility="collapsed")
+            st.slider("Jauge", 0, slider_max, key="h_slider", on_change=update_balance_slider, label_visibility="collapsed")
+            
+            if st.button("💾 ENREGISTRER OBJECTIF", type="primary", use_container_width=True):
+                st.session_state.db["user_data"][st.session_state.current_pilot] = {
+                    "auec_balance": st.session_state.calc_balance,
+                    "acquisition_target": new_tgt if new_tgt != "—" else None
+                }
+                save_db_to_cloud(st.session_state.db)
+                st.success("Sauvegardé !")
+                time.sleep(1)
+                st.rerun()
 
-    with c2:
-        st.markdown("**🚀 Vaisseau Cible**")
-        new_tgt = st.selectbox("Sélection", opts, index=idx, key="target_selector", label_visibility="collapsed")
-        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-        if st.button("💾 ACTUALISER", type="primary", use_container_width=True):
-            st.session_state.db["user_data"][st.session_state.current_pilot] = {
-                "auec_balance": st.session_state.calc_balance,
-                "acquisition_target": new_tgt if new_tgt != "—" else None
-            }
-            save_db_to_cloud(st.session_state.db); st.rerun()
-
-    if target_cost > 0:
-        bal = st.session_state.calc_balance
-        pct = min(1.0, bal/target_cost)
-        st.markdown(f"**Progression : {int(pct*100)}%** ({bal:,.0f} / {target_cost:,.0f} aUEC)")
-        st.progress(pct)
-        if bal >= target_cost: st.success("Fonds suffisants ! 🚀")
+        with c2:
+            st.markdown(f"**📊 Progression vers : {current_selection}**")
+            if target_cost > 0:
+                bal = st.session_state.calc_balance
+                pct = min(1.0, bal/target_cost)
+                
+                # Jauge visuelle custom
+                st.markdown(f"""
+                <div style="background:#163347; border-radius:10px; padding:20px; text-align:center; border:1px solid #00d4ff;">
+                    <h2 style="margin:0; color:#fff;">{int(pct*100)}%</h2>
+                    <p style="color:#aaa;">{bal:,.0f} / <span style="color:#00d4ff; font-weight:bold;">{target_cost:,.0f} aUEC</span></p>
+                </div>
+                """, unsafe_allow_html=True)
+                st.progress(pct)
+                
+                if bal >= target_cost:
+                    st.markdown("""<div style="background:rgba(0,255,0,0.2); border:1px solid #0f0; color:#fff; padding:10px; border-radius:5px; text-align:center; margin-top:10px;">
+                    🚀 FONDS SUFFISANTS POUR L'ACHAT !
+                    </div>""", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"*Il manque {target_cost - bal:,.0f} aUEC*")
+            else:
+                st.info("Sélectionnez un vaisseau achetable en jeu pour voir la progression.")
 
 def corpo_fleet_page():
     st.subheader("FLOTTE CORPORATIVE")
