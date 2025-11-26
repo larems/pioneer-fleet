@@ -100,6 +100,16 @@ def get_local_img_as_base64(path):
         except: pass
     return "" 
 
+def get_current_ship_price(ship_name, price_type):
+    """Récupère le prix actuel depuis le catalogue."""
+    info = SHIPS_DB.get(ship_name, {})
+    if price_type == 'USD':
+        return float(info.get('price', 0) or 0)
+    elif price_type == 'aUEC':
+        val = info.get('auec_price', 0)
+        return float(val) if isinstance(val, (int, float)) else 0.0
+    return 0.0
+
 def submit_cart_batch():
     if not st.session_state.current_pilot:
         st.error("Vous devez être connecté.")
@@ -148,6 +158,34 @@ def submit_cart_batch():
         st.session_state.cart = []
         time.sleep(1)
         st.rerun()
+
+def process_fleet_updates(edited_df: pd.DataFrame):
+    if edited_df.empty: return
+    current_fleet = st.session_state.db["fleet"]
+    needs_save = False
+
+    if "Supprimer" in edited_df.columns:
+        ids_to_del = edited_df[edited_df["Supprimer"] == True]["id"].tolist()
+        if ids_to_del:
+            st.session_state.db["fleet"] = [s for s in current_fleet if s.get("id") not in ids_to_del]
+            needs_save = True
+
+    update_map = edited_df.set_index("id")[["Dispo", "Assurance"]].to_dict("index")
+    for ship in st.session_state.db["fleet"]:
+        sid = ship.get("id")
+        if sid in update_map:
+            row = update_map[sid]
+            if ship["Dispo"] != bool(row["Dispo"]):
+                ship["Dispo"] = bool(row["Dispo"])
+                needs_save = True
+            if ship.get("Assurance") != row["Assurance"]:
+                ship["Assurance"] = row["Assurance"]
+                needs_save = True
+
+    if needs_save:
+        if save_db_to_cloud(st.session_state.db):
+            st.success("✅ Synchronisation terminée")
+            time.sleep(0.5); st.rerun()
 
 # --- 4. CSS (Styles Ajustés) ---
 bg_img_code = get_local_img_as_base64(BACKGROUND_IMAGE)
@@ -370,6 +408,25 @@ def my_hangar_page():
         if my_fleet:
             df = pd.DataFrame(my_fleet)
             
+            # CALCUL TOTAL (USD & aUEC) SUR LA FLOTTE FILTRÉE
+            total_usd_personal = 0
+            total_auec_personal = 0
+            
+            # On calcule sur toute la flotte perso (avant recherche) pour l'affichage global
+            # Note: On utilise les prix du catalogue pour être à jour
+            for _, row in df.iterrows():
+                if row['Source'] == 'STORE':
+                    total_usd_personal += get_current_ship_price(row['Vaisseau'], 'USD')
+                elif row['Source'] == 'INGAME':
+                    total_auec_personal += get_current_ship_price(row['Vaisseau'], 'aUEC')
+
+            # AFFICHER LES TOTAUX
+            col_m1, col_m2, col_m3 = st.columns(3)
+            col_m1.metric("VALEUR PLEDGE (USD)", f"${total_usd_personal:,.0f}")
+            col_m2.metric("VALEUR IN-GAME (aUEC)", f"{total_auec_personal:,.0f}")
+            col_m3.metric("VAISSEAUX", len(df))
+            st.markdown("---")
+
             # FILTRE DE RECHERCHE
             if search_hangar:
                 m = search_hangar.lower()
@@ -380,10 +437,8 @@ def my_hangar_page():
             if df.empty:
                 st.info("Aucun vaisseau trouvé avec cette recherche.")
             else:
-                # --- AJOUT DU TRI PAR PRIX (USD) ---
-                # On récupère le prix USD du catalogue pour chaque vaisseau pour le tri
-                df['Sort_Price'] = df['Vaisseau'].apply(lambda x: SHIPS_DB.get(x, {}).get('price', 0) or 0)
-                # On trie du plus cher au moins cher
+                # --- TRI PAR PRIX (USD) ---
+                df['Sort_Price'] = df['Vaisseau'].apply(lambda x: get_current_ship_price(x, 'USD'))
                 df = df.sort_values(by='Sort_Price', ascending=False)
 
                 # Groupement pour affichage carte
@@ -392,8 +447,8 @@ def my_hangar_page():
                     'Image': 'first'
                 }).reset_index().rename(columns={'id': 'Quantité'})
                 
-                # Pour garder le tri après le groupement, on doit re-trier le DataFrame groupé
-                grp_fleet['Sort_Price'] = grp_fleet['Vaisseau'].apply(lambda x: SHIPS_DB.get(x, {}).get('price', 0) or 0)
+                # Re-Tri du groupement
+                grp_fleet['Sort_Price'] = grp_fleet['Vaisseau'].apply(lambda x: get_current_ship_price(x, 'USD'))
                 grp_fleet = grp_fleet.sort_values(by='Sort_Price', ascending=False)
 
                 # Affichage en grille
@@ -522,12 +577,21 @@ def corpo_fleet_page():
     df = pd.DataFrame(st.session_state.db["fleet"])
     if df.empty: st.info("Aucune donnée."); return
 
-    df["Prix_USD"] = pd.to_numeric(df["Prix_USD"], errors="coerce").fillna(0)
+    # CALCUL TOTAL GLOBAL (CORRECTION)
+    total_usd_global = 0
+    total_auec_global = 0
     
-    c1, c2, c3 = st.columns(3)
+    for _, row in df.iterrows():
+        if row['Source'] == 'STORE':
+            total_usd_global += get_current_ship_price(row['Vaisseau'], 'USD')
+        elif row['Source'] == 'INGAME':
+            total_auec_global += get_current_ship_price(row['Vaisseau'], 'aUEC')
+
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("VAISSEAUX", len(df))
-    c2.metric("VALEUR USD", f"${df[df['Source']=='STORE']['Prix_USD'].sum():,.0f}")
-    c3.metric("PRÊTABLES", df["Dispo"].sum())
+    c2.metric("VALEUR FLOTTE (USD)", f"${total_usd_global:,.0f}")
+    c3.metric("VALEUR FLOTTE (aUEC)", f"{total_auec_global:,.0f}")
+    c4.metric("PRÊTABLES", df["Dispo"].sum())
 
     st.markdown("---")
 
