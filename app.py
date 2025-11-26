@@ -15,7 +15,7 @@ st.set_page_config(
 )
 BACKGROUND_IMAGE = "assets/fondecransite.png"
 
-# Liste des vaisseaux considérés comme "Majeurs" (en plus de la règle > 800$)
+# Liste des vaisseaux considérés comme "Majeurs"
 FLAGSHIPS_LIST = [
     "Javelin", "Idris-M", "Idris-P", "Kraken", "Kraken Privateer", 
     "890 Jump", "Polaris", "Nautilus", "Hammerhead", "Perseus", "Carrack", "Carrack Expedition",
@@ -543,7 +543,7 @@ def my_hangar_page():
                     <div style="text-align:center; margin: 30px 0 10px 0;">
                         <div style="font-size: 30px; color: #ffaa00; margin-bottom: -10px;">▼</div>
                         <h2 style="color: #ffaa00; border-bottom: 2px solid #ffaa00; display: inline-block; padding: 0 20px 10px 20px;">
-                            FLOTTE AMIRALE & HAUTE VALEUR
+                            FLOTTE AMIRALE
                         </h2>
                     </div>
                     """, unsafe_allow_html=True)
@@ -650,7 +650,7 @@ def corpo_fleet_page():
     <div style="text-align:center; margin: 30px 0 10px 0;">
         <div style="font-size: 30px; color: #ffaa00; margin-bottom: -10px;">▼</div>
         <h2 style="color: #ffaa00; border-bottom: 2px solid #ffaa00; display: inline-block; padding: 0 20px 10px 20px;">
-            FLOTTE AMIRALE & HAUTE VALEUR
+            FLOTTE AMIRALE
         </h2>
     </div>
     """, unsafe_allow_html=True)
