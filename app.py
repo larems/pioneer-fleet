@@ -842,10 +842,11 @@ def corpo_fleet_page():
         grp['Valeur Unitaire'] = grp.apply(get_price_display, axis=1)
         final_view = grp[["Visuel", "Vaisseau", "Rôle", "Source", "Propriétaire", "Quantité", "Valeur Unitaire"]]
 
+        # --- FIX LARGEUR COLONNE IMAGE POUR LE MENU ---
         st.dataframe(
             final_view,
             column_config={
-                "Visuel": st.column_config.ImageColumn("Aperçu", width="medium"),
+                "Visuel": st.column_config.ImageColumn("Aperçu", width=150), # Largeur fixe en pixels
                 "Propriétaire": st.column_config.TextColumn("Pilotes"),
                 "Quantité": st.column_config.ProgressColumn("Stock", max_value=int(grp["Quantité"].max())),
                 "Valeur Unitaire": st.column_config.TextColumn("Valeur (Unité)")
