@@ -11,7 +11,7 @@ st.set_page_config(
     page_title="PIONEER COMMAND | OPS CONSOLE",
     layout="wide",
     page_icon="💠",
-    initial_sidebar_state="expanded" # Force la sidebar ouverte par défaut
+    initial_sidebar_state="expanded" # Force le menu ouvert au démarrage
 )
 BACKGROUND_IMAGE = "assets/fondecransite.png"
 
@@ -186,7 +186,7 @@ def submit_cart_batch():
         time.sleep(1)
         st.rerun()
 
-# --- 4. CSS (Styles Ajustés & Lock Sidebar) ---
+# --- 4. CSS (Styles Ajustés & LOCK SIDEBAR TOTAL) ---
 bg_img_code = get_local_img_as_base64(BACKGROUND_IMAGE)
 st.markdown(f"""
 <style>
@@ -196,15 +196,30 @@ st.markdown(f"""
 section[data-testid="stSidebar"] {{ background-color: rgba(5, 10, 18, 0.98); border-right: 1px solid #123; }}
 h1, h2, h3 {{ font-family: 'Orbitron', sans-serif !important; color: #fff !important; text-transform: uppercase; border-bottom: 2px solid rgba(0, 212, 255, 0.2); }}
 p, div, span, label, button {{ font-family: 'Rajdhani', sans-serif !important; }}
+
+/* --- LOCK SIDEBAR : ON TUE TOUS LES BOUTONS DE FERMETURE --- */
+
+/* 1. Cache le bouton chevron/croix à l'intérieur de la sidebar */
+section[data-testid="stSidebar"] button {{
+    display: none !important;
+}}
+
+/* 2. Cache le bouton d'ouverture > en haut à gauche de la page principale */
+[data-testid="collapsedControl"] {{
+    display: none !important;
+}}
+
+/* 3. Cache tout contrôle de collapse spécifique à Streamlit */
+[data-testid="stSidebarCollapsedControl"] {{
+    display: none !important;
+}}
+
+/* --- FIN LOCK --- */
+
 ::-webkit-scrollbar {{ width: 8px; }}
 ::-webkit-scrollbar-track {{ background: #020408; }}
 ::-webkit-scrollbar-thumb {{ background: #163347; border-radius: 4px; }}
 ::-webkit-scrollbar-thumb:hover {{ background: #00d4ff; }}
-
-/* --- LOCK SIDEBAR & HIDE ARROW --- */
-[data-testid="stSidebarCollapsedControl"] {{
-    display: none;
-}}
 
 /* CSS NAVIGATION PROPRE */
 div[data-testid="stRadio"] > label {{ display: none; }}
@@ -283,10 +298,7 @@ def render_sidebar():
                 st.session_state.current_pilot = None; st.session_state.cart = []; st.rerun()
             st.markdown("---")
             
-            # --- RETOUR AUX 3 MENUS (SANS LE 4E) ---
             nav_opts = ["CATALOGUE", "MON HANGAR", "FLOTTE CORPO"]
-            
-            # Gestion sécurité si l'état actuel n'est pas dans la liste
             curr_idx = 0
             if st.session_state.menu_nav in nav_opts:
                 curr_idx = nav_opts.index(st.session_state.menu_nav)
@@ -707,7 +719,7 @@ def corpo_fleet_page():
 
     st.markdown("---")
     
-    # --- CREATION DES ONGLETS POUR SEPARER VISUEL / TABLEAU ---
+    # --- ONGLETS POUR SEPARER VISUEL / TABLEAU ---
     tab_visu, tab_table = st.tabs(["🚀 VUE FLOTTE", "📋 REGISTRE COMPLET"])
     
     with tab_visu:
