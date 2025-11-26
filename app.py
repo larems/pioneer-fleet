@@ -206,6 +206,23 @@ p, div, span, label, button {{ font-family: 'Rajdhani', sans-serif !important; }
 ::-webkit-scrollbar-thumb {{ background: #163347; border-radius: 4px; }}
 ::-webkit-scrollbar-thumb:hover {{ background: #00d4ff; }}
 
+/* CSS NAVIGATION PROPRE (AJOUTÉ) */
+div[data-testid="stRadio"] > label {{ display: none; }}
+div[data-testid="stRadio"] div[role="radiogroup"] > label {{
+    background: rgba(255,255,255,0.05);
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    margin-bottom: 5px;
+    transition: all 0.3s;
+}}
+div[data-testid="stRadio"] div[role="radiogroup"] > label:hover {{ border-color: #00d4ff; background: rgba(0, 212, 255, 0.1); }}
+div[data-testid="stRadio"] div[role="radiogroup"] > label[data-checked="true"] {{
+    background: linear-gradient(90deg, rgba(0, 212, 255, 0.2), transparent);
+    border-left: 4px solid #00d4ff;
+    color: #00d4ff !important;
+}}
+
 /* CORPO CARD STYLE */
 .corpo-card {{
     background: linear-gradient(135deg, rgba(4,20,35,0.95), rgba(0,0,0,0.95));
@@ -314,7 +331,7 @@ def catalogue_page():
     with col_main:
         st.subheader(f"REGISTRE ({len(st.session_state.cart)} SÉLECTIONNÉS)")
         
-        # BARRE DE RECHERCHE CENTRALE (PLACÉE ICI COMME DEMANDÉ)
+        # BARRE DE RECHERCHE CENTRALE
         search_list = sorted(list(SHIPS_DB.keys()))
         search = st.multiselect("RECHERCHE", search_list, placeholder="🔍 Rechercher un vaisseau...", label_visibility="collapsed")
 
@@ -481,9 +498,6 @@ def my_hangar_page():
                 def render_fleet_grid_editable(dataframe, is_flagship=False):
                     if dataframe.empty: return
                     
-                    # Groupement pour l'affichage (On groupe aussi par Dispo pour permettre la gestion unitaire si besoin,
-                    # ou on groupe juste par type et on gère la dispo globale). 
-                    # ICI: On groupe par (Vaisseau, Source, Assurance, Dispo) pour avoir des piles cohérentes
                     grp = dataframe.groupby(['Vaisseau', 'Source', 'Assurance', 'Dispo']).agg({
                         'id': 'count',
                         'Image': 'first'
@@ -544,7 +558,6 @@ def my_hangar_page():
                                 new_disp = st.toggle("Disponibilité (Prêt)", value=dispo, key=f"disp_{i}_{name}_{source}_{insurance}")
 
                                 # LOGIQUE DE MISE A JOUR
-                                # Si l'un des deux change, on update la DB
                                 if new_ins != insurance or new_disp != dispo:
                                     update_ship_attributes(st.session_state.current_pilot, name, source, insurance, dispo, new_ins, new_disp)
 
@@ -721,35 +734,42 @@ def corpo_fleet_page():
 
     if not df_standard.empty:
         all_roles = sorted(df_standard["Rôle"].unique())
-        tabs = st.tabs(all_roles)
+        
+        # --- CORRECTION 1 : REMPLACEMENT DES TABS PAR UN SELECTBOX ---
+        # Anciennement: tabs = st.tabs(all_roles)
+        selected_role_view = st.selectbox("📂 Filtrer par Rôle", ["Tout afficher"] + all_roles)
+        
+        # Filtrage selon la sélection
+        if selected_role_view == "Tout afficher":
+            df_to_show = df_standard
+        else:
+            df_to_show = df_standard[df_standard["Rôle"] == selected_role_view]
+            
+        # Groupement
+        grp_role = df_to_show.groupby(['Vaisseau']).agg({
+            'Propriétaire': lambda x: sorted(x.unique()),
+            'id': 'count',
+            'Image': 'first'
+        }).reset_index()
 
-        for i, role in enumerate(all_roles):
-            with tabs[i]:
-                df_role = df_standard[df_standard["Rôle"] == role]
-                grp_role = df_role.groupby(['Vaisseau']).agg({
-                    'Propriétaire': lambda x: sorted(x.unique()),
-                    'id': 'count',
-                    'Image': 'first'
-                }).reset_index()
-
-                cols_role = st.columns(3) 
-                for j, row in grp_role.iterrows():
-                    with cols_role[j % 3]:
-                        img_b64 = get_local_img_as_base64(row['Image'])
-                        pilots_html = "".join([f"<span class='corpo-pilot-tag'>{p}</span>" for p in row['Propriétaire']])
-                        
-                        st.markdown(f"""
-                        <div class="corpo-card">
-                            <img src="{img_b64}" class="corpo-card-img">
-                            <div class="corpo-card-header">
-                                <span class="corpo-card-title">{row['Vaisseau']}</span>
-                                <span class="corpo-card-count">x{row['id']}</span>
-                            </div>
-                            <div class="corpo-card-body">
-                                <div>{pilots_html}</div>
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
+        cols_role = st.columns(3) 
+        for j, row in grp_role.iterrows():
+            with cols_role[j % 3]:
+                img_b64 = get_local_img_as_base64(row['Image'])
+                pilots_html = "".join([f"<span class='corpo-pilot-tag'>{p}</span>" for p in row['Propriétaire']])
+                
+                st.markdown(f"""
+                <div class="corpo-card">
+                    <img src="{img_b64}" class="corpo-card-img">
+                    <div class="corpo-card-header">
+                        <span class="corpo-card-title">{row['Vaisseau']}</span>
+                        <span class="corpo-card-count">x{row['id']}</span>
+                    </div>
+                    <div class="corpo-card-body">
+                        <div>{pilots_html}</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
 
     # --- BARRE DE RECHERCHE ET TABLEAU FINAL ---
     st.markdown("---")
@@ -788,10 +808,11 @@ def corpo_fleet_page():
     grp['Valeur Unitaire'] = grp.apply(get_price_display, axis=1)
     final_view = grp[["Visuel", "Vaisseau", "Rôle", "Source", "Propriétaire", "Quantité", "Valeur Unitaire"]]
 
+    # --- CORRECTION 2 : COLONNE IMAGE ELARGIE (width="medium") ---
     st.dataframe(
         final_view,
         column_config={
-            "Visuel": st.column_config.ImageColumn("Aperçu", width="small"),
+            "Visuel": st.column_config.ImageColumn("Aperçu", width="medium"), # <-- C'est ici que ça corrige le bug du menu
             "Propriétaire": st.column_config.TextColumn("Pilotes"),
             "Quantité": st.column_config.ProgressColumn("Stock", max_value=int(grp["Quantité"].max())),
             "Valeur Unitaire": st.column_config.TextColumn("Valeur (Unité)")
