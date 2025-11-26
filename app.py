@@ -112,17 +112,20 @@ def get_current_ship_price(ship_name, price_type):
 
 def check_is_high_value(ship_name):
     """Détermine si un vaisseau doit être dans la section Amirale."""
+    # 1. Est-il dans la liste manuelle ?
     if ship_name in FLAGSHIPS_LIST:
         return True
+    # 2. Coûte-t-il plus de 800$ ?
     usd_price = get_current_ship_price(ship_name, 'USD')
     if usd_price >= 800:
         return True
     return False
 
 def update_ship_attributes(pilot, ship_name, source, old_insurance, old_dispo, new_insurance, new_dispo):
-    """Met à jour l'assurance et la disponibilité."""
+    """Met à jour l'assurance et la disponibilité d'un groupe de vaisseaux."""
     updated = False
     for s in st.session_state.db["fleet"]:
+        # On cherche les vaisseaux qui correspondent aux anciens critères pour les mettre à jour
         if (s["Propriétaire"] == pilot and 
             s["Vaisseau"] == ship_name and 
             s["Source"] == source and 
@@ -202,62 +205,6 @@ p, div, span, label, button {{ font-family: 'Rajdhani', sans-serif !important; }
 ::-webkit-scrollbar-track {{ background: #020408; }}
 ::-webkit-scrollbar-thumb {{ background: #163347; border-radius: 4px; }}
 ::-webkit-scrollbar-thumb:hover {{ background: #00d4ff; }}
-
-/* CATALOG CARD STYLE */
-.catalog-card {{
-    background: #041623;
-    border-radius: 8px;
-    border: 1px solid #163347;
-    overflow: hidden;
-    margin-bottom: 8px;
-    transition: 0.2s;
-}}
-.catalog-card-selected {{
-    border: 2px solid #00d4ff;
-    box-shadow: 0 0 15px rgba(0, 212, 255, 0.4);
-}}
-.catalog-card-img-container {{
-    height: 150px;
-    background: #000;
-}}
-.catalog-card-img {{
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}}
-.catalog-card-body {{
-    padding: 10px;
-}}
-.catalog-card-header {{
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}}
-.catalog-card-title {{
-    font-weight: bold;
-    color: #fff;
-    font-size: 1.1em;
-}}
-.catalog-card-badge {{
-    background: #00d4ff;
-    color: black;
-    font-weight: bold;
-    padding: 0 6px;
-    border-radius: 4px;
-}}
-.catalog-card-footer {{
-    display: flex;
-    justify-content: space-between;
-    font-size: 0.9em;
-    color: #ccc;
-    margin-top: 4px;
-}}
-/* FIX: Change text color to black when card is selected */
-.catalog-card-selected .catalog-card-title,
-.catalog-card-selected .catalog-card-footer span {{
-    color: #fff !important;
-}}
-
 
 /* CORPO CARD STYLE */
 .corpo-card {{
@@ -351,6 +298,7 @@ def home_page():
 def catalogue_page():
     col_filters, col_main, col_cart = st.columns([1, 3.5, 1.5])
     
+    # --- 1. FILTRES (GAUCHE) ---
     with col_filters:
         st.subheader("PARAMÈTRES")
         p_source = st.radio("SOURCE", ["STORE", "INGAME"], index=0 if st.session_state.selected_source == "STORE" else 1)
@@ -362,12 +310,15 @@ def catalogue_page():
         brands = ["Tous"] + sorted(list(set(d.get("brand") for d in SHIPS_DB.values() if d.get("brand"))))
         f_brand = st.selectbox("CONSTRUCTEUR", brands)
         
+    # --- 2. ZONE CENTRALE ---
     with col_main:
         st.subheader(f"REGISTRE ({len(st.session_state.cart)} SÉLECTIONNÉS)")
         
+        # BARRE DE RECHERCHE CENTRALE (PLACÉE ICI COMME DEMANDÉ)
         search_list = sorted(list(SHIPS_DB.keys()))
         search = st.multiselect("RECHERCHE", search_list, placeholder="🔍 Rechercher un vaisseau...", label_visibility="collapsed")
 
+        # LOGIQUE DE FILTRAGE
         filtered = {}
         for name, data in SHIPS_DB.items():
             if f_brand != "Tous" and data.get("brand") != f_brand: continue
@@ -379,6 +330,7 @@ def catalogue_page():
         total_pages = max(1, (len(items) + PER_PAGE - 1) // PER_PAGE)
         if st.session_state.catalog_page >= total_pages: st.session_state.catalog_page = 0
 
+        # PAGINATION
         c1, c2, c3 = st.columns([1, 4, 1])
         with c1: 
             if st.button("◄", disabled=(st.session_state.catalog_page==0)): st.session_state.catalog_page -= 1; st.rerun()
@@ -391,6 +343,7 @@ def catalogue_page():
         
         if not current_batch: st.info("Aucun vaisseau.")
         
+        # GRILLE D'AFFICHAGE
         cols = st.columns(2)
         for i, (name, data) in enumerate(current_batch):
             with cols[i % 2]:
@@ -411,9 +364,9 @@ def catalogue_page():
                     price_str = f"{pv:,.0f} aUEC" if isinstance(pv, (int, float)) and pv > 0 else "N/A"
                     price_col = "#30e8ff"
 
-                # CORRECTIF HTML : Suppression des indentations pour éviter le rendu brut
+                # HTML Card Compact
                 badge_html = f"<div style='background:#00d4ff; color:black; font-weight:bold; padding:0 6px; border-radius:4px;'>x{count_in_cart}</div>" if count_in_cart > 0 else ""
-                card_html = f'<div style="background:#041623; border-radius:8px; border:{border}; box-shadow:{shadow}; overflow:hidden; margin-bottom:8px; transition:0.2s;"><div style="height:150px; background:#000;"><img src="{img_b64}" style="width:100%; height:100%; object-fit:cover; opacity:{opacity}"></div><div style="padding:10px;"><div style="display:flex; justify-content:space-between; align-items:center;"><div style="font-weight:bold; color:#fff; font-size:1.1em;">{name}</div>{badge_html}</div><div style="display:flex; justify-content:space-between; font-size:0.9em; color:#ccc; margin-top:4px;"><span>{data.get("role","N/A")}</span><span style="color:{price_col}; font-weight:bold;">{price_str}</span></div></div></div>'
+                card_html = f"<div style='background:#041623; border-radius:8px; border:{border}; box-shadow:{shadow}; overflow:hidden; margin-bottom:8px; transition:0.2s;'><div style='height:150px; background:#000;'><img src='{img_b64}' style='width:100%; height:100%; object-fit:cover; opacity:{opacity}'></div><div style='padding:10px;'><div style='display:flex; justify-content:space-between; align-items:center;'><div style='font-weight:bold; color:#fff; font-size:1.1em;'>{name}</div>{badge_html}</div><div style='display:flex; justify-content:space-between; font-size:0.9em; color:#ccc; margin-top:4px;'><span>{data.get('role','N/A')}</span><span style='color:{price_col}; font-weight:bold;'>{price_str}</span></div></div></div>"
                 
                 st.markdown(card_html, unsafe_allow_html=True)
 
@@ -470,19 +423,23 @@ def catalogue_page():
 def my_hangar_page():
     st.subheader(f"HANGAR LOGISTIQUE | {st.session_state.current_pilot}")
     
+    # CHARGEMENT DONNEES
     pilot_data = st.session_state.db.get("user_data", {}).get(st.session_state.current_pilot, {})
     current_auec = pilot_data.get("auec_balance", 0)
     target = pilot_data.get("acquisition_target", None)
     my_fleet = [s for s in st.session_state.db["fleet"] if s["Propriétaire"] == st.session_state.current_pilot]
 
+    # --- ONGLET 1 : MA FLOTTE VISUELLE ---
     tab_fleet, tab_acq = st.tabs(["🚀 MA FLOTTE", "🎯 OBJECTIF D'ACHAT"])
 
     with tab_fleet:
+        # BARRE DE RECHERCHE HANGAR
         search_hangar = st.text_input("🔍 Rechercher un vaisseau dans mon hangar...", "")
 
         if my_fleet:
             df = pd.DataFrame(my_fleet)
             
+            # CALCUL TOTAL (USD & aUEC) SUR LA FLOTTE FILTRÉE
             total_usd_personal = 0
             total_auec_personal = 0
             
@@ -498,6 +455,7 @@ def my_hangar_page():
             col_m3.metric("VAISSEAUX", len(df))
             st.markdown("---")
 
+            # FILTRE DE RECHERCHE
             if search_hangar:
                 m = search_hangar.lower()
                 df = df[df["Vaisseau"].str.lower().str.contains(m) | 
@@ -507,7 +465,9 @@ def my_hangar_page():
             if df.empty:
                 st.info("Aucun vaisseau trouvé avec cette recherche.")
             else:
+                # --- SEPARATION (FLAGSHIPS / STANDARD) + TRI PAR PRIX ---
                 df['is_flagship'] = df['Vaisseau'].apply(check_is_high_value)
+                
                 df_flags = df[df['is_flagship'] == True].copy()
                 df_std = df[df['is_flagship'] == False].copy()
 
@@ -517,9 +477,13 @@ def my_hangar_page():
                 df_std['Sort_Price'] = df_std['Vaisseau'].apply(lambda x: get_current_ship_price(x, 'USD'))
                 df_std = df_std.sort_values(by='Sort_Price', ascending=False)
 
+                # FONCTION D'AFFICHAGE AVEC MODIFICATION
                 def render_fleet_grid_editable(dataframe, is_flagship=False):
                     if dataframe.empty: return
                     
+                    # Groupement pour l'affichage (On groupe aussi par Dispo pour permettre la gestion unitaire si besoin,
+                    # ou on groupe juste par type et on gère la dispo globale). 
+                    # ICI: On groupe par (Vaisseau, Source, Assurance, Dispo) pour avoir des piles cohérentes
                     grp = dataframe.groupby(['Vaisseau', 'Source', 'Assurance', 'Dispo']).agg({
                         'id': 'count',
                         'Image': 'first'
@@ -551,6 +515,7 @@ def my_hangar_page():
                             count_class = "corpo-card-count flagship-count" if is_flagship else "corpo-card-count"
                             img_style = "height:350px;" if is_flagship else "height:200px;"
 
+                            # 1. CARTE VISUELLE
                             st.markdown(f"""
                             <div class="{card_class}">
                                 <img src="{img_b64}" class="corpo-card-img" style="{img_style}">
@@ -567,18 +532,25 @@ def my_hangar_page():
                             </div>
                             """, unsafe_allow_html=True)
                             
+                            # 2. CONTROLES DE GESTION SOUS LA CARTE
                             c_edit, c_del = st.columns([3, 1])
                             
                             with c_edit:
+                                # Sélecteur d'Assurance
                                 ins_opts = ["LTI", "10 Ans", "2 ans", "6 Mois", "2 Mois", "Standard"]
                                 new_ins = st.selectbox("Assurance", ins_opts, index=ins_opts.index(insurance) if insurance in ins_opts else 5, key=f"ins_{i}_{name}_{source}_{dispo}", label_visibility="collapsed")
+                                
+                                # Toggle Dispo
                                 new_disp = st.toggle("Disponibilité (Prêt)", value=dispo, key=f"disp_{i}_{name}_{source}_{insurance}")
 
+                                # LOGIQUE DE MISE A JOUR
+                                # Si l'un des deux change, on update la DB
                                 if new_ins != insurance or new_disp != dispo:
                                     update_ship_attributes(st.session_state.current_pilot, name, source, insurance, dispo, new_ins, new_disp)
 
                             with c_del:
                                 if st.button("🗑️", key=f"del_{i}_{name}_{source}_{dispo}", help="Retirer un exemplaire"):
+                                    # Logique de suppression unitaire
                                     to_remove_id = None
                                     for s in st.session_state.db["fleet"]:
                                         if (s["Propriétaire"] == st.session_state.current_pilot and 
@@ -593,8 +565,16 @@ def my_hangar_page():
                                         save_db_to_cloud(st.session_state.db)
                                         st.rerun()
 
+                # AFFICHAGE
                 if not df_flags.empty:
-                    st.markdown("""<div style="text-align:center; margin: 30px 0 10px 0;"><div style="font-size: 30px; color: #ffaa00; margin-bottom: -10px;">▼</div><h2 style="color: #ffaa00; border-bottom: 2px solid #ffaa00; display: inline-block; padding: 0 20px 10px 20px;">FLOTTE AMIRALE</h2></div>""", unsafe_allow_html=True)
+                    st.markdown("""
+                    <div style="text-align:center; margin: 30px 0 10px 0;">
+                        <div style="font-size: 30px; color: #ffaa00; margin-bottom: -10px;">▼</div>
+                        <h2 style="color: #ffaa00; border-bottom: 2px solid #ffaa00; display: inline-block; padding: 0 20px 10px 20px;">
+                            FLOTTE AMIRALE
+                        </h2>
+                    </div>
+                    """, unsafe_allow_html=True)
                     render_fleet_grid_editable(df_flags, is_flagship=True)
 
                 st.markdown("### 🚀 FLOTTE STANDARD")
@@ -603,6 +583,7 @@ def my_hangar_page():
         else:
             st.info("Hangar vide. Allez au catalogue pour ajouter des vaisseaux.")
 
+    # --- ONGLET 2 : ACQUISITION ---
     with tab_acq:
         st.markdown("### 🎯 CALCULATEUR D'OBJECTIF")
         
@@ -651,21 +632,29 @@ def my_hangar_page():
                 bal = st.session_state.calc_balance
                 pct = min(1.0, bal/target_cost)
                 
-                st.markdown(f"""<div style="background:#163347; border-radius:10px; padding:20px; text-align:center; border:1px solid #00d4ff;"><h2 style="margin:0; color:#fff;">{int(pct*100)}%</h2><p style="color:#aaa;">{bal:,.0f} / <span style="color:#00d4ff; font-weight:bold;">{target_cost:,.0f} aUEC</span></p></div>""", unsafe_allow_html=True)
+                st.markdown(f"""
+                <div style="background:#163347; border-radius:10px; padding:20px; text-align:center; border:1px solid #00d4ff;">
+                    <h2 style="margin:0; color:#fff;">{int(pct*100)}%</h2>
+                    <p style="color:#aaa;">{bal:,.0f} / <span style="color:#00d4ff; font-weight:bold;">{target_cost:,.0f} aUEC</span></p>
+                </div>
+                """, unsafe_allow_html=True)
                 st.progress(pct)
                 
                 if bal >= target_cost:
-                    st.markdown("""<div style="background:rgba(0,255,0,0.2); border:1px solid #0f0; color:#fff; padding:10px; border-radius:5px; text-align:center; margin-top:10px;">🚀 FONDS SUFFISANTS POUR L'ACHAT !</div>""", unsafe_allow_html=True)
+                    st.markdown("""<div style="background:rgba(0,255,0,0.2); border:1px solid #0f0; color:#fff; padding:10px; border-radius:5px; text-align:center; margin-top:10px;">
+                    🚀 FONDS SUFFISANTS POUR L'ACHAT !
+                    </div>""", unsafe_allow_html=True)
                 else:
                     st.markdown(f"*Il manque {target_cost - bal:,.0f} aUEC*")
             else:
                 st.info("Sélectionnez un vaisseau achetable en jeu pour voir la progression.")
 
 def corpo_fleet_page():
-    st.subheader("FLOTTE CORPORATIVE →")
+    st.subheader("FLOTTE CORPORATIVE")
     df = pd.DataFrame(st.session_state.db["fleet"])
     if df.empty: st.info("Aucune donnée."); return
 
+    # CALCUL TOTAL GLOBAL
     total_usd_global = 0
     total_auec_global = 0
     
@@ -683,9 +672,19 @@ def corpo_fleet_page():
 
     st.markdown("---")
 
-    st.markdown("""<div style="text-align:center; margin: 30px 0 10px 0;"><div style="font-size: 30px; color: #ffaa00; margin-bottom: -10px;">▼</div><h2 style="color: #ffaa00; border-bottom: 2px solid #ffaa00; display: inline-block; padding: 0 20px 10px 20px;">FLOTTE AMIRALE</h2></div>""", unsafe_allow_html=True)
+    # --- SECTION FLAGSHIPS & HIGH VALUE ---
+    st.markdown("""
+    <div style="text-align:center; margin: 30px 0 10px 0;">
+        <div style="font-size: 30px; color: #ffaa00; margin-bottom: -10px;">▼</div>
+        <h2 style="color: #ffaa00; border-bottom: 2px solid #ffaa00; display: inline-block; padding: 0 20px 10px 20px;">
+            FLOTTE AMIRALE
+        </h2>
+    </div>
+    """, unsafe_allow_html=True)
     
+    # FILTRE
     df['is_flagship'] = df['Vaisseau'].apply(check_is_high_value)
+    
     df_flagships = df[df['is_flagship'] == True]
     df_standard = df[df['is_flagship'] == False]
     
@@ -702,7 +701,18 @@ def corpo_fleet_page():
                 img_b64 = get_local_img_as_base64(row['Image'])
                 pilots_html = "".join([f"<span class='corpo-pilot-tag'>{p}</span>" for p in row['Propriétaire']])
                 
-                st.markdown(f"""<div class="corpo-card flagship-card"><img src="{img_b64}" class="corpo-card-img"><div class="corpo-card-header"><span class="corpo-card-title">{row['Vaisseau']}</span><span class="corpo-card-count flagship-count">x{row['id']}</span></div><div class="corpo-card-body"><div>{pilots_html}</div></div></div>""", unsafe_allow_html=True)
+                st.markdown(f"""
+                <div class="corpo-card flagship-card">
+                    <img src="{img_b64}" class="corpo-card-img">
+                    <div class="corpo-card-header">
+                        <span class="corpo-card-title">{row['Vaisseau']}</span>
+                        <span class="corpo-card-count flagship-count">x{row['id']}</span>
+                    </div>
+                    <div class="corpo-card-body">
+                        <div>{pilots_html}</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
     else:
         st.info("Aucun vaisseau majeur détecté.")
 
@@ -728,7 +738,67 @@ def corpo_fleet_page():
                         img_b64 = get_local_img_as_base64(row['Image'])
                         pilots_html = "".join([f"<span class='corpo-pilot-tag'>{p}</span>" for p in row['Propriétaire']])
                         
-                        st.markdown(f"""<div class="corpo-card"><img src="{img_b64}" class="corpo-card-img"><div class="corpo-card-header"><span class="corpo-card-title">{row['Vaisseau']}</span><span class="corpo-card-count">x{row['id']}</span></div><div class="corpo-card-body"><div>{pilots_html}</div></div></div>""", unsafe_allow_html=True)
+                        st.markdown(f"""
+                        <div class="corpo-card">
+                            <img src="{img_b64}" class="corpo-card-img">
+                            <div class="corpo-card-header">
+                                <span class="corpo-card-title">{row['Vaisseau']}</span>
+                                <span class="corpo-card-count">x{row['id']}</span>
+                            </div>
+                            <div class="corpo-card-body">
+                                <div>{pilots_html}</div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+    # --- BARRE DE RECHERCHE ET TABLEAU FINAL ---
+    st.markdown("---")
+    st.markdown("### 📋 DÉTAIL GLOBAL")
+    
+    c_search, c_void = st.columns([2, 1])
+    with c_search:
+        search = st.text_input("🔍 Filtrer la liste globale (Vaisseau, Pilote, Rôle)", "")
+
+    if search:
+        m = search.lower()
+        df = df[df["Vaisseau"].str.lower().str.contains(m) | 
+                df["Propriétaire"].str.lower().str.contains(m) | 
+                df["Rôle"].str.lower().str.contains(m)]
+
+    grp = df.groupby(['Vaisseau', 'Source', 'Rôle']).agg({
+        'Propriétaire': lambda x: ', '.join(sorted(x.unique())),
+        'id': 'count',
+        'Image': 'first'
+    }).reset_index().rename(columns={'id': 'Quantité'})
+    
+    grp['Visuel'] = grp['Image'].apply(get_local_img_as_base64)
+
+    def get_price_display(row):
+        name = row['Vaisseau']
+        source = row['Source']
+        info = SHIPS_DB.get(name)
+        if not info: return "N/A"
+        if source == "STORE":
+            p = info.get("price", 0)
+            return f"${p:,.0f}" if p else "N/A"
+        else:
+            p = info.get("auec_price", 0)
+            return f"{p:,.0f} aUEC" if isinstance(p, (int, float)) else "N/A"
+
+    grp['Valeur Unitaire'] = grp.apply(get_price_display, axis=1)
+    final_view = grp[["Visuel", "Vaisseau", "Rôle", "Source", "Propriétaire", "Quantité", "Valeur Unitaire"]]
+
+    st.dataframe(
+        final_view,
+        column_config={
+            "Visuel": st.column_config.ImageColumn("Aperçu", width="small"),
+            "Propriétaire": st.column_config.TextColumn("Pilotes"),
+            "Quantité": st.column_config.ProgressColumn("Stock", max_value=int(grp["Quantité"].max())),
+            "Valeur Unitaire": st.column_config.TextColumn("Valeur (Unité)")
+        },
+        use_container_width=True,
+        hide_index=True
+    )
 
 # --- MAIN LOOP ---
 render_sidebar()
