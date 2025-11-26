@@ -20,7 +20,7 @@ JSONBIN_ID = st.secrets.get("JSONBIN_ID", "6921f0ded0ea881f40f9933f")
 JSONBIN_KEY = st.secrets.get("JSONBIN_KEY", "")
 
 def normalize_db_schema(db: dict) -> dict:
-    """Normalise la structure de la DB pour éviter les KeyError."""
+    """Normalise la structure de la DB."""
     db.setdefault("users", {})
     db.setdefault("fleet", [])
     db.setdefault("user_data", {}) 
@@ -41,7 +41,6 @@ def normalize_db_schema(db: dict) -> dict:
         ship.setdefault("Prix", None)
         ship.setdefault("crew_max", 1)
 
-        # Migration anciens champs
         legacy_price = ship.get("Prix", None)
         if legacy_price not in (None, "", 0, 0.0):
             try:
@@ -94,7 +93,6 @@ if "db" not in st.session_state:
 else:
     st.session_state.db = normalize_db_schema(st.session_state.db)
 
-
 # --- 3. FONCTIONS UTILITAIRES & ACTIONS ---
 
 @st.cache_data(show_spinner=False)
@@ -107,7 +105,6 @@ def get_local_img_as_base64(path):
     return "" 
 
 def submit_cart_batch():
-    """NOUVELLE FONCTION : Enregistre tout le panier en une fois."""
     if not st.session_state.current_pilot:
         st.error("Vous devez être connecté.")
         return
@@ -127,7 +124,6 @@ def submit_cart_batch():
         info = SHIPS_DB.get(ship_name)
         if not info: continue
 
-        # Génération ID unique
         new_id = int(time.time() * 1_000_000) + len(new_entries)
         
         entry = {
@@ -148,13 +144,12 @@ def submit_cart_batch():
         }
         new_entries.append(entry)
 
-    # Ajout local + Sauvegarde Cloud
     st.session_state.db["fleet"].extend(new_entries)
     
     if save_db_to_cloud(st.session_state.db):
         st.balloons()
         st.toast(f"✅ {len(new_entries)} vaisseaux ajoutés au hangar !", icon="🚀")
-        st.session_state.cart = [] # Vider le panier
+        st.session_state.cart = []
         time.sleep(1)
         st.rerun()
 
@@ -163,14 +158,12 @@ def process_fleet_updates(edited_df: pd.DataFrame):
     current_fleet = st.session_state.db["fleet"]
     needs_save = False
 
-    # Suppressions
     if "Supprimer" in edited_df.columns:
         ids_to_del = edited_df[edited_df["Supprimer"] == True]["id"].tolist()
         if ids_to_del:
             st.session_state.db["fleet"] = [s for s in current_fleet if s.get("id") not in ids_to_del]
             needs_save = True
 
-    # Mises à jour (Dispo/Assurance)
     update_map = edited_df.set_index("id")[["Dispo", "Assurance"]].to_dict("index")
     for ship in st.session_state.db["fleet"]:
         sid = ship.get("id")
@@ -198,7 +191,6 @@ st.markdown(f"""
 section[data-testid="stSidebar"] {{ background-color: rgba(5, 10, 18, 0.98); border-right: 1px solid #123; }}
 h1, h2, h3 {{ font-family: 'Orbitron', sans-serif !important; color: #fff !important; text-transform: uppercase; border-bottom: 2px solid rgba(0, 212, 255, 0.2); }}
 p, div, span, label, button {{ font-family: 'Rajdhani', sans-serif !important; }}
-/* Custom Scrollbar */
 ::-webkit-scrollbar {{ width: 8px; }}
 ::-webkit-scrollbar-track {{ background: #020408; }}
 ::-webkit-scrollbar-thumb {{ background: #163347; border-radius: 4px; }}
@@ -211,7 +203,6 @@ if "catalog_page" not in st.session_state: st.session_state.catalog_page = 0
 if "menu_nav" not in st.session_state: st.session_state.menu_nav = "CATALOGUE"
 if "selected_source" not in st.session_state: st.session_state.selected_source = "STORE"
 if "selected_insurance" not in st.session_state: st.session_state.selected_insurance = "LTI"
-# NOUVEAU : Initialisation du panier
 if "cart" not in st.session_state: st.session_state.cart = [] 
 
 # --- 6. SIDEBAR ---
@@ -254,25 +245,20 @@ def home_page():
                         st.rerun()
 
 def catalogue_page():
-    """NOUVELLE PAGE CATALOGUE AVEC PANIER"""
     col_filters, col_main, col_cart = st.columns([1, 3.5, 1.5])
-
-    # --- FILTRES ---
+    
     with col_filters:
         st.subheader("PARAMÈTRES")
         p_source = st.radio("SOURCE", ["STORE", "INGAME"], index=0 if st.session_state.selected_source == "STORE" else 1)
         st.session_state.selected_source = p_source
-        
         ins_opts = ["LTI", "10 Ans", "2 ans", "6 Mois", "2 Mois", "Standard"]
         p_ins = st.selectbox("ASSURANCE", ins_opts, index=0)
         st.session_state.selected_insurance = p_ins
-        
         st.markdown("---")
         brands = ["Tous"] + sorted(list(set(d.get("brand") for d in SHIPS_DB.values() if d.get("brand"))))
         f_brand = st.selectbox("CONSTRUCTEUR", brands)
         search = st.multiselect("RECHERCHE", sorted(list(SHIPS_DB.keys())))
 
-    # --- LOGIQUE FILTRE ---
     filtered = {}
     for name, data in SHIPS_DB.items():
         if f_brand != "Tous" and data.get("brand") != f_brand: continue
@@ -284,11 +270,8 @@ def catalogue_page():
     total_pages = max(1, (len(items) + PER_PAGE - 1) // PER_PAGE)
     if st.session_state.catalog_page >= total_pages: st.session_state.catalog_page = 0
     
-    # --- CATALOGUE GRILLE ---
     with col_main:
         st.subheader(f"REGISTRE ({len(st.session_state.cart)} SÉLECTIONNÉS)")
-        
-        # Pagination
         c1, c2, c3 = st.columns([1, 4, 1])
         with c1: 
             if st.button("◄", disabled=(st.session_state.catalog_page==0)): st.session_state.catalog_page -= 1; st.rerun()
@@ -305,18 +288,14 @@ def catalogue_page():
         for i, (name, data) in enumerate(current_batch):
             with cols[i % 2]:
                 img_b64 = get_local_img_as_base64(data.get("img", ""))
-                
-                # Est-ce que ce vaisseau est déjà dans le panier ?
                 in_cart = any(item['name'] == name for item in st.session_state.cart)
                 
-                # Style dynamique
                 border = "2px solid #00d4ff" if in_cart else "1px solid #163347"
                 shadow = "0 0 15px rgba(0, 212, 255, 0.4)" if in_cart else "none"
                 opacity = "0.7" if in_cart else "1.0"
                 btn_txt = "✅ DANS LE PANIER" if in_cart else "AJOUTER AU PANIER"
                 btn_type = "primary" if in_cart else "secondary"
 
-                # Prix affichage
                 if p_source == "STORE":
                     pv = data.get('price', 0)
                     price_str = f"${pv:,.0f} USD" if isinstance(pv, (int, float)) else str(pv)
@@ -326,7 +305,6 @@ def catalogue_page():
                     price_str = f"{pv:,.0f} aUEC" if isinstance(pv, (int, float)) and pv > 0 else "N/A"
                     price_col = "#30e8ff"
 
-                # Carte HTML
                 st.markdown(f"""
                 <div style="background:#041623; border-radius:8px; border:{border}; box-shadow:{shadow}; overflow:hidden; margin-bottom:8px; transition:0.2s;">
                     <div style="height:150px; background:#000;">
@@ -342,7 +320,6 @@ def catalogue_page():
                 </div>
                 """, unsafe_allow_html=True)
 
-                # Bouton Toggle
                 if st.button(btn_txt, key=f"btn_{name}", use_container_width=True, type=btn_type):
                     if in_cart:
                         st.session_state.cart = [x for x in st.session_state.cart if x['name'] != name]
@@ -355,7 +332,6 @@ def catalogue_page():
                         })
                     st.rerun()
 
-    # --- PANIER (DROITE) ---
     with col_cart:
         st.subheader("VALIDATION")
         if st.session_state.current_pilot:
@@ -382,38 +358,25 @@ def catalogue_page():
             st.markdown("---")
             if st.button(f"💾 ENREGISTRER TOUT ({len(st.session_state.cart)})", type="primary", use_container_width=True):
                 submit_cart_batch()
-            
             if st.button("🗑️ Vider", use_container_width=True):
                 st.session_state.cart = []; st.rerun()
 
-
 def my_hangar_page():
     st.subheader(f"HANGAR | {st.session_state.current_pilot}")
-    
-    # Données pilote
     pilot_data = st.session_state.db.get("user_data", {}).get(st.session_state.current_pilot, {})
     current_auec = pilot_data.get("auec_balance", 0)
     target = pilot_data.get("acquisition_target", None)
 
-    # Filtrage flotte
     my_fleet = [s for s in st.session_state.db["fleet"] if s["Propriétaire"] == st.session_state.current_pilot]
     
     if my_fleet:
         df = pd.DataFrame(my_fleet)
-        
-        # --- CORRECTION DU BUG ICI ---
-        # Ajout de la colonne 'Supprimer' indispensable pour l'éditeur
-        df["Supprimer"] = False  
-        
-        # Nettoyage données
+        df["Supprimer"] = False
         df["Prix_USD"] = pd.to_numeric(df["Prix_USD"], errors="coerce").fillna(0)
         df["Prix_aUEC"] = pd.to_numeric(df["Prix_aUEC"], errors="coerce").fillna(0)
         df['Visuel'] = df['Image'].apply(get_local_img_as_base64)
-        
-        # Colonne Prix Combiné
         df["Affiche_Prix"] = df.apply(lambda x: f"${x['Prix_USD']:,.0f}" if x["Source"]=="STORE" else f"{x['Prix_aUEC']:,.0f} aUEC", axis=1)
 
-        # Config éditeur
         col_cfg = {
             "id": st.column_config.NumberColumn("ID", disabled=True),
             "Visuel": st.column_config.ImageColumn("Aperçu"),
@@ -425,7 +388,6 @@ def my_hangar_page():
         }
         visible_cols = ["id", "Visuel", "Vaisseau", "Rôle", "Source", "Assurance", "Dispo", "Affiche_Prix", "Supprimer"]
 
-        # 1. TABLEAU STORE
         df_store = df[df["Source"]=="STORE"].copy()
         if not df_store.empty:
             st.markdown(f"#### 💰 STORE (${df_store['Prix_USD'].sum():,.0f})")
@@ -433,7 +395,6 @@ def my_hangar_page():
         else:
             edit_store = pd.DataFrame()
 
-        # 2. TABLEAU INGAME
         df_game = df[df["Source"]=="INGAME"].copy()
         if not df_game.empty:
             st.markdown(f"#### 💸 INGAME ({df_game['Prix_aUEC'].sum():,.0f} aUEC)")
@@ -441,49 +402,73 @@ def my_hangar_page():
         else:
             edit_game = pd.DataFrame()
 
-        # Bouton Sauvegarde Hangar
         if st.button("💾 SAUVEGARDER MODIFICATIONS HANGAR", type="primary", use_container_width=True):
             full_edit = pd.concat([edit_store, edit_game], ignore_index=True)
             process_fleet_updates(full_edit)
-
     else:
         st.info("Hangar vide.")
 
-    # SECTION OBJECTIF ACHAT
     render_acquisition_tracking(current_auec, target)
 
 def render_acquisition_tracking(balance, target):
     st.markdown("---")
     st.markdown("### 🎯 OBJECTIF DU PILOTE")
     
-    with st.form("obj_form"):
-        c1, c2 = st.columns([1, 2])
-        with c1: new_bal = st.number_input("Mon Solde aUEC", value=int(balance), step=1000)
-        with c2: 
-            opts = ["—"] + sorted([n for n, d in SHIPS_DB.items() if d.get('ingame')])
-            idx = opts.index(target) if target in opts else 0
-            new_tgt = st.selectbox("Vaisseau Cible", opts, index=idx)
+    # === SYNC LOGIC POUR SLIDER & INPUT ===
+    if "calc_balance" not in st.session_state:
+        st.session_state.calc_balance = int(balance)
+
+    def update_balance_slider():
+        st.session_state.calc_balance = st.session_state.widget_slider
+    def update_balance_num():
+        st.session_state.calc_balance = st.session_state.widget_num
+
+    # Définition de la cible et du max slider
+    opts = ["—"] + sorted([n for n, d in SHIPS_DB.items() if d.get('ingame')])
+    idx = opts.index(target) if target in opts else 0
+    
+    # Layout en 2 colonnes
+    c1, c2 = st.columns([1, 1.5])
+    
+    with c1:
+        st.markdown("**💰 Mon Solde aUEC**")
+        # SLIDER ET INPUT SYNCHRONISÉS
+        slider_max = 100_000_000
+        if target and target in SHIPS_DB:
+            t_price = SHIPS_DB[target].get('auec_price', 0)
+            if isinstance(t_price, (int, float)) and t_price > 0:
+                slider_max = int(t_price * 1.5)
+
+        st.slider("Jauge rapide", 0, slider_max, key="widget_slider", on_change=update_balance_slider, label_visibility="collapsed")
+        st.number_input("Montant précis", value=st.session_state.calc_balance, step=10000, key="widget_num", on_change=update_balance_num, label_visibility="collapsed")
+
+    with c2:
+        st.markdown("**🚀 Vaisseau Cible**")
+        new_tgt = st.selectbox("Sélection", opts, index=idx, label_visibility="collapsed")
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True) # Espacement pour aligner le bouton
         
-        if st.form_submit_button("ACTUALISER OBJECTIF"):
+        if st.button("💾 METTRE À JOUR SOLDE & OBJECTIF", type="primary", use_container_width=True):
             st.session_state.db["user_data"][st.session_state.current_pilot] = {
-                "auec_balance": new_bal,
+                "auec_balance": st.session_state.calc_balance,
                 "acquisition_target": new_tgt if new_tgt != "—" else None
             }
             save_db_to_cloud(st.session_state.db); st.rerun()
 
+    # Barre de progression (si cible valide)
     if target and target in SHIPS_DB:
         cost = SHIPS_DB[target].get('auec_price', 0)
         if isinstance(cost, (int, float)) and cost > 0:
-            pct = min(1.0, balance/cost)
-            st.progress(pct, text=f"Progression : {int(pct*100)}% ({balance:,.0f} / {cost:,.0f} aUEC)")
-            if balance >= cost: st.success("Fonds suffisants ! 🚀")
+            bal = st.session_state.calc_balance
+            pct = min(1.0, bal/cost)
+            st.markdown(f"**Progression : {int(pct*100)}%** ({bal:,.0f} / {cost:,.0f} aUEC)")
+            st.progress(pct)
+            if bal >= cost: st.success("Fonds suffisants pour l'achat ! 🚀")
 
 def corpo_fleet_page():
     st.subheader("FLOTTE CORPORATIVE")
     df = pd.DataFrame(st.session_state.db["fleet"])
     if df.empty: st.info("Aucune donnée."); return
 
-    # Stats
     df["Prix_USD"] = pd.to_numeric(df["Prix_USD"], errors="coerce").fillna(0)
     c1, c2, c3 = st.columns(3)
     c1.metric("VAISSEAUX", len(df))
@@ -492,7 +477,6 @@ def corpo_fleet_page():
 
     st.markdown("---")
     
-    # Graphs
     g1, g2 = st.columns(2)
     with g1:
         v_counts = df["Marque"].value_counts().reset_index()
@@ -503,14 +487,13 @@ def corpo_fleet_page():
         r_counts.columns = ["Rôle", "Count"]
         st.plotly_chart(px.bar(r_counts, x="Count", y="Rôle", orientation='h', title="Rôles"), use_container_width=True)
 
-    # Liste détaillée groupée
     st.markdown("### 📋 DÉTAIL GLOBAL")
     search = st.text_input("🔍 Recherche globale...")
     if search:
         m = search.lower()
         df = df[df["Vaisseau"].str.lower().str.contains(m) | df["Propriétaire"].str.lower().str.contains(m)]
 
-    grp = df.groupby(['Vaisseau', 'Source']).agg({
+    grp = df.groupby(['Vaisseau', 'Source', 'Rôle']).agg({
         'Propriétaire': lambda x: ', '.join(sorted(x.unique())),
         'id': 'count',
         'Image': 'first'
@@ -518,10 +501,14 @@ def corpo_fleet_page():
     
     grp['Visuel'] = grp['Image'].apply(get_local_img_as_base64)
     
+    # SÉLECTION DES COLONNES POUR MASQUER "Image" (le chemin texte)
+    # On n'affiche que : Visuel, Vaisseau, Rôle, Source, Pilotes, Quantité
+    final_view = grp[["Visuel", "Vaisseau", "Rôle", "Source", "Propriétaire", "Quantité"]]
+
     st.dataframe(
-        grp,
+        final_view,
         column_config={
-            "Visuel": st.column_config.ImageColumn("Img", width="small"),
+            "Visuel": st.column_config.ImageColumn("Aperçu", width="small"),
             "Propriétaire": st.column_config.TextColumn("Pilotes"),
             "Quantité": st.column_config.ProgressColumn("Stock", max_value=int(grp["Quantité"].max()))
         },
