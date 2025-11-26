@@ -11,6 +11,7 @@ st.set_page_config(
     page_title="PIONEER COMMAND | OPS CONSOLE",
     layout="wide",
     page_icon="💠",
+    initial_sidebar_state="expanded" # Force la sidebar ouverte par défaut
 )
 BACKGROUND_IMAGE = "assets/fondecransite.png"
 
@@ -185,7 +186,7 @@ def submit_cart_batch():
         time.sleep(1)
         st.rerun()
 
-# --- 4. CSS (Styles Ajustés) ---
+# --- 4. CSS (Styles Ajustés & Lock Sidebar) ---
 bg_img_code = get_local_img_as_base64(BACKGROUND_IMAGE)
 st.markdown(f"""
 <style>
@@ -199,6 +200,11 @@ p, div, span, label, button {{ font-family: 'Rajdhani', sans-serif !important; }
 ::-webkit-scrollbar-track {{ background: #020408; }}
 ::-webkit-scrollbar-thumb {{ background: #163347; border-radius: 4px; }}
 ::-webkit-scrollbar-thumb:hover {{ background: #00d4ff; }}
+
+/* --- LOCK SIDEBAR & HIDE ARROW --- */
+[data-testid="stSidebarCollapsedControl"] {{
+    display: none;
+}}
 
 /* CSS NAVIGATION PROPRE */
 div[data-testid="stRadio"] > label {{ display: none; }}
@@ -277,8 +283,8 @@ def render_sidebar():
                 st.session_state.current_pilot = None; st.session_state.cart = []; st.rerun()
             st.markdown("---")
             
-            # MISE A JOUR DES OPTIONS DE NAVIGATION
-            nav_opts = ["CATALOGUE", "MON HANGAR", "FLOTTE CORPO", "REGISTRE GLOBAL"]
+            # --- RETOUR AUX 3 MENUS (SANS LE 4E) ---
+            nav_opts = ["CATALOGUE", "MON HANGAR", "FLOTTE CORPO"]
             
             # Gestion sécurité si l'état actuel n'est pas dans la liste
             curr_idx = 0
@@ -684,162 +690,158 @@ def corpo_fleet_page():
     df = pd.DataFrame(st.session_state.db["fleet"])
     if df.empty: st.info("Aucune donnée."); return
 
-    # CALCUL TOTAL GLOBAL
+    # KPIs
+    c1, c2, c3, c4 = st.columns(4)
     total_usd_global = 0
     total_auec_global = 0
-    
     for _, row in df.iterrows():
         if row['Source'] == 'STORE':
             total_usd_global += get_current_ship_price(row['Vaisseau'], 'USD')
         elif row['Source'] == 'INGAME':
             total_auec_global += get_current_ship_price(row['Vaisseau'], 'aUEC')
 
-    c1, c2, c3, c4 = st.columns(4)
     c1.metric("VAISSEAUX", len(df))
     c2.metric("VALEUR FLOTTE (USD)", f"${total_usd_global:,.0f}")
     c3.metric("VALEUR FLOTTE (aUEC)", f"{total_auec_global:,.0f}")
     c4.metric("PRÊTABLES", df["Dispo"].sum())
 
     st.markdown("---")
-
-    # --- SECTION FLAGSHIPS & HIGH VALUE ---
-    st.markdown("""
-    <div style="text-align:center; margin: 30px 0 10px 0;">
-        <div style="font-size: 30px; color: #ffaa00; margin-bottom: -10px;">▼</div>
-        <h2 style="color: #ffaa00; border-bottom: 2px solid #ffaa00; display: inline-block; padding: 0 20px 10px 20px;">
-            FLOTTE AMIRALE
-        </h2>
-    </div>
-    """, unsafe_allow_html=True)
     
-    # FILTRE
-    df['is_flagship'] = df['Vaisseau'].apply(check_is_high_value)
+    # --- CREATION DES ONGLETS POUR SEPARER VISUEL / TABLEAU ---
+    tab_visu, tab_table = st.tabs(["🚀 VUE FLOTTE", "📋 REGISTRE COMPLET"])
     
-    df_flagships = df[df['is_flagship'] == True]
-    df_standard = df[df['is_flagship'] == False]
-    
-    if not df_flagships.empty:
-        grp_flags = df_flagships.groupby(['Vaisseau', 'Source']).agg({
-            'Propriétaire': lambda x: sorted(x.unique()),
-            'id': 'count',
-            'Image': 'first'
-        }).reset_index()
-
-        cols = st.columns(3)
-        for i, row in grp_flags.iterrows():
-            with cols[i % 3]:
-                img_b64 = get_local_img_as_base64(row['Image'])
-                pilots_html = "".join([f"<span class='corpo-pilot-tag'>{p}</span>" for p in row['Propriétaire']])
-                
-                st.markdown(f"""
-                <div class="corpo-card flagship-card">
-                    <img src="{img_b64}" class="corpo-card-img">
-                    <div class="corpo-card-header">
-                        <span class="corpo-card-title">{row['Vaisseau']}</span>
-                        <span class="corpo-card-count flagship-count">x{row['id']}</span>
-                    </div>
-                    <div class="corpo-card-body">
-                        <div>{pilots_html}</div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-    else:
-        st.info("Aucun vaisseau majeur détecté.")
-
-    st.markdown("---")
-    st.markdown("### 🚀 FLOTTE STANDARD")
-
-    if not df_standard.empty:
-        all_roles = sorted(df_standard["Rôle"].unique())
+    with tab_visu:
+        # --- SECTION FLAGSHIPS ---
+        st.markdown("""
+        <div style="text-align:center; margin: 30px 0 10px 0;">
+            <div style="font-size: 30px; color: #ffaa00; margin-bottom: -10px;">▼</div>
+            <h2 style="color: #ffaa00; border-bottom: 2px solid #ffaa00; display: inline-block; padding: 0 20px 10px 20px;">
+                FLOTTE AMIRALE
+            </h2>
+        </div>
+        """, unsafe_allow_html=True)
         
-        selected_role_view = st.selectbox("📂 Filtrer par Rôle", ["Tout afficher"] + all_roles)
+        df['is_flagship'] = df['Vaisseau'].apply(check_is_high_value)
+        df_flagships = df[df['is_flagship'] == True]
+        df_standard = df[df['is_flagship'] == False]
         
-        if selected_role_view == "Tout afficher":
-            df_to_show = df_standard
+        if not df_flagships.empty:
+            grp_flags = df_flagships.groupby(['Vaisseau', 'Source']).agg({
+                'Propriétaire': lambda x: sorted(x.unique()),
+                'id': 'count',
+                'Image': 'first'
+            }).reset_index()
+
+            cols = st.columns(3)
+            for i, row in grp_flags.iterrows():
+                with cols[i % 3]:
+                    img_b64 = get_local_img_as_base64(row['Image'])
+                    pilots_html = "".join([f"<span class='corpo-pilot-tag'>{p}</span>" for p in row['Propriétaire']])
+                    
+                    st.markdown(f"""
+                    <div class="corpo-card flagship-card">
+                        <img src="{img_b64}" class="corpo-card-img">
+                        <div class="corpo-card-header">
+                            <span class="corpo-card-title">{row['Vaisseau']}</span>
+                            <span class="corpo-card-count flagship-count">x{row['id']}</span>
+                        </div>
+                        <div class="corpo-card-body">
+                            <div>{pilots_html}</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
         else:
-            df_to_show = df_standard[df_standard["Rôle"] == selected_role_view]
+            st.info("Aucun vaisseau majeur détecté.")
+
+        st.markdown("---")
+        st.markdown("### 🚀 FLOTTE STANDARD")
+
+        if not df_standard.empty:
+            all_roles = sorted(df_standard["Rôle"].unique())
             
-        grp_role = df_to_show.groupby(['Vaisseau']).agg({
-            'Propriétaire': lambda x: sorted(x.unique()),
+            selected_role_view = st.selectbox("📂 Filtrer par Rôle", ["Tout afficher"] + all_roles)
+            
+            if selected_role_view == "Tout afficher":
+                df_to_show = df_standard
+            else:
+                df_to_show = df_standard[df_standard["Rôle"] == selected_role_view]
+                
+            grp_role = df_to_show.groupby(['Vaisseau']).agg({
+                'Propriétaire': lambda x: sorted(x.unique()),
+                'id': 'count',
+                'Image': 'first'
+            }).reset_index()
+
+            cols_role = st.columns(3) 
+            for j, row in grp_role.iterrows():
+                with cols_role[j % 3]:
+                    img_b64 = get_local_img_as_base64(row['Image'])
+                    pilots_html = "".join([f"<span class='corpo-pilot-tag'>{p}</span>" for p in row['Propriétaire']])
+                    
+                    st.markdown(f"""
+                    <div class="corpo-card">
+                        <img src="{img_b64}" class="corpo-card-img">
+                        <div class="corpo-card-header">
+                            <span class="corpo-card-title">{row['Vaisseau']}</span>
+                            <span class="corpo-card-count">x{row['id']}</span>
+                        </div>
+                        <div class="corpo-card-body">
+                            <div>{pilots_html}</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+    with tab_table:
+        st.subheader("📋 DÉTAIL GLOBAL")
+        
+        # BARRE DE RECHERCHE ET TABLEAU
+        c_search, c_void = st.columns([2, 1])
+        with c_search:
+            search = st.text_input("🔍 Filtrer la liste globale (Vaisseau, Pilote, Rôle)", "")
+
+        df_filtered = df.copy()
+        if search:
+            m = search.lower()
+            df_filtered = df_filtered[df_filtered["Vaisseau"].str.lower().str.contains(m) | 
+                    df_filtered["Propriétaire"].str.lower().str.contains(m) | 
+                    df_filtered["Rôle"].str.lower().str.contains(m)]
+
+        # Groupement pour l'affichage
+        grp = df_filtered.groupby(['Vaisseau', 'Source', 'Rôle']).agg({
+            'Propriétaire': lambda x: ', '.join(sorted(x.unique())),
             'id': 'count',
             'Image': 'first'
-        }).reset_index()
+        }).reset_index().rename(columns={'id': 'Quantité'})
+        
+        grp['Visuel'] = grp['Image'].apply(get_local_img_as_base64)
 
-        cols_role = st.columns(3) 
-        for j, row in grp_role.iterrows():
-            with cols_role[j % 3]:
-                img_b64 = get_local_img_as_base64(row['Image'])
-                pilots_html = "".join([f"<span class='corpo-pilot-tag'>{p}</span>" for p in row['Propriétaire']])
-                
-                st.markdown(f"""
-                <div class="corpo-card">
-                    <img src="{img_b64}" class="corpo-card-img">
-                    <div class="corpo-card-header">
-                        <span class="corpo-card-title">{row['Vaisseau']}</span>
-                        <span class="corpo-card-count">x{row['id']}</span>
-                    </div>
-                    <div class="corpo-card-body">
-                        <div>{pilots_html}</div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+        def get_price_display(row):
+            name = row['Vaisseau']
+            source = row['Source']
+            info = SHIPS_DB.get(name)
+            if not info: return "N/A"
+            if source == "STORE":
+                p = info.get("price", 0)
+                return f"${p:,.0f}" if p else "N/A"
+            else:
+                p = info.get("auec_price", 0)
+                return f"{p:,.0f} aUEC" if isinstance(p, (int, float)) else "N/A"
 
-# --- NOUVELLE PAGE DÉDIÉE : REGISTRE GLOBAL ---
-def global_registry_page():
-    st.subheader("📋 REGISTRE GLOBAL & DÉTAILS")
-    
-    df = pd.DataFrame(st.session_state.db["fleet"])
-    if df.empty: 
-        st.info("La flotte est vide.")
-        return
+        grp['Valeur Unitaire'] = grp.apply(get_price_display, axis=1)
+        final_view = grp[["Visuel", "Vaisseau", "Rôle", "Source", "Propriétaire", "Quantité", "Valeur Unitaire"]]
 
-    # BARRE DE RECHERCHE ET TABLEAU
-    c_search, c_void = st.columns([2, 1])
-    with c_search:
-        search = st.text_input("🔍 Filtrer la liste globale (Vaisseau, Pilote, Rôle)", "")
-
-    if search:
-        m = search.lower()
-        df = df[df["Vaisseau"].str.lower().str.contains(m) | 
-                df["Propriétaire"].str.lower().str.contains(m) | 
-                df["Rôle"].str.lower().str.contains(m)]
-
-    # Groupement pour l'affichage
-    grp = df.groupby(['Vaisseau', 'Source', 'Rôle']).agg({
-        'Propriétaire': lambda x: ', '.join(sorted(x.unique())),
-        'id': 'count',
-        'Image': 'first'
-    }).reset_index().rename(columns={'id': 'Quantité'})
-    
-    grp['Visuel'] = grp['Image'].apply(get_local_img_as_base64)
-
-    def get_price_display(row):
-        name = row['Vaisseau']
-        source = row['Source']
-        info = SHIPS_DB.get(name)
-        if not info: return "N/A"
-        if source == "STORE":
-            p = info.get("price", 0)
-            return f"${p:,.0f}" if p else "N/A"
-        else:
-            p = info.get("auec_price", 0)
-            return f"{p:,.0f} aUEC" if isinstance(p, (int, float)) else "N/A"
-
-    grp['Valeur Unitaire'] = grp.apply(get_price_display, axis=1)
-    final_view = grp[["Visuel", "Vaisseau", "Rôle", "Source", "Propriétaire", "Quantité", "Valeur Unitaire"]]
-
-    st.dataframe(
-        final_view,
-        column_config={
-            "Visuel": st.column_config.ImageColumn("Aperçu", width="medium"),
-            "Propriétaire": st.column_config.TextColumn("Pilotes"),
-            "Quantité": st.column_config.ProgressColumn("Stock", max_value=int(grp["Quantité"].max())),
-            "Valeur Unitaire": st.column_config.TextColumn("Valeur (Unité)")
-        },
-        use_container_width=True,
-        hide_index=True,
-        height=800
-    )
+        st.dataframe(
+            final_view,
+            column_config={
+                "Visuel": st.column_config.ImageColumn("Aperçu", width="medium"),
+                "Propriétaire": st.column_config.TextColumn("Pilotes"),
+                "Quantité": st.column_config.ProgressColumn("Stock", max_value=int(grp["Quantité"].max())),
+                "Valeur Unitaire": st.column_config.TextColumn("Valeur (Unité)")
+            },
+            use_container_width=True,
+            hide_index=True,
+            height=800
+        )
 
 # --- MAIN LOOP ---
 render_sidebar()
@@ -849,4 +851,3 @@ else:
     if st.session_state.menu_nav == "CATALOGUE": catalogue_page()
     elif st.session_state.menu_nav == "MON HANGAR": my_hangar_page()
     elif st.session_state.menu_nav == "FLOTTE CORPO": corpo_fleet_page()
-    elif st.session_state.menu_nav == "REGISTRE GLOBAL": global_registry_page()
