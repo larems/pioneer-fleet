@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import base64
 import os
 import requests
@@ -112,20 +111,15 @@ def get_current_ship_price(ship_name, price_type):
 
 def check_is_high_value(ship_name):
     """Détermine si un vaisseau doit être dans la section Amirale."""
-    # 1. Est-il dans la liste manuelle ?
-    if ship_name in FLAGSHIPS_LIST:
-        return True
-    # 2. Coûte-t-il plus de 800$ ?
+    if ship_name in FLAGSHIPS_LIST: return True
     usd_price = get_current_ship_price(ship_name, 'USD')
-    if usd_price >= 800:
-        return True
+    if usd_price >= 800: return True
     return False
 
 def update_ship_attributes(pilot, ship_name, source, old_insurance, old_dispo, new_insurance, new_dispo):
     """Met à jour l'assurance et la disponibilité d'un groupe de vaisseaux."""
     updated = False
     for s in st.session_state.db["fleet"]:
-        # On cherche les vaisseaux qui correspondent aux anciens critères pour les mettre à jour
         if (s["Propriétaire"] == pilot and 
             s["Vaisseau"] == ship_name and 
             s["Source"] == source and 
@@ -206,7 +200,7 @@ p, div, span, label, button {{ font-family: 'Rajdhani', sans-serif !important; }
 ::-webkit-scrollbar-thumb {{ background: #163347; border-radius: 4px; }}
 ::-webkit-scrollbar-thumb:hover {{ background: #00d4ff; }}
 
-/* CSS NAVIGATION PROPRE (AJOUTÉ) */
+/* CSS NAVIGATION PROPRE */
 div[data-testid="stRadio"] > label {{ display: none; }}
 div[data-testid="stRadio"] div[role="radiogroup"] > label {{
     background: rgba(255,255,255,0.05);
@@ -282,7 +276,19 @@ def render_sidebar():
             if st.button("DÉCONNEXION", use_container_width=True):
                 st.session_state.current_pilot = None; st.session_state.cart = []; st.rerun()
             st.markdown("---")
-            nav = st.radio("NAVIGATION", ["CATALOGUE", "MON HANGAR", "FLOTTE CORPO"], index=["CATALOGUE", "MON HANGAR", "FLOTTE CORPO"].index(st.session_state.menu_nav), label_visibility="collapsed")
+            
+            # MISE A JOUR DES OPTIONS DE NAVIGATION
+            nav_opts = ["CATALOGUE", "MON HANGAR", "FLOTTE CORPO", "REGISTRE GLOBAL"]
+            
+            # Gestion sécurité si l'état actuel n'est pas dans la liste
+            curr_idx = 0
+            if st.session_state.menu_nav in nav_opts:
+                curr_idx = nav_opts.index(st.session_state.menu_nav)
+            else:
+                st.session_state.menu_nav = "CATALOGUE"
+            
+            nav = st.radio("NAVIGATION", nav_opts, index=curr_idx, label_visibility="collapsed")
+            
             if nav != st.session_state.menu_nav:
                 st.session_state.menu_nav = nav; st.session_state.catalog_page = 0; st.rerun()
         else:
@@ -320,12 +326,20 @@ def catalogue_page():
         st.subheader("PARAMÈTRES")
         p_source = st.radio("SOURCE", ["STORE", "INGAME"], index=0 if st.session_state.selected_source == "STORE" else 1)
         st.session_state.selected_source = p_source
+        
         ins_opts = ["LTI", "10 Ans", "2 ans", "6 Mois", "2 Mois", "Standard"]
         p_ins = st.selectbox("ASSURANCE", ins_opts, index=0)
         st.session_state.selected_insurance = p_ins
+        
         st.markdown("---")
+        
+        # CONSTRUCTEUR
         brands = ["Tous"] + sorted(list(set(d.get("brand") for d in SHIPS_DB.values() if d.get("brand"))))
         f_brand = st.selectbox("CONSTRUCTEUR", brands)
+
+        # RÔLE (NOUVEAU)
+        all_roles = sorted(list(set(d.get("role", "Inconnu") for d in SHIPS_DB.values() if d.get("role"))))
+        f_role = st.selectbox("RÔLE", ["Tous"] + all_roles)
         
     # --- 2. ZONE CENTRALE ---
     with col_main:
@@ -338,8 +352,11 @@ def catalogue_page():
         # LOGIQUE DE FILTRAGE
         filtered = {}
         for name, data in SHIPS_DB.items():
+            # Filtres
             if f_brand != "Tous" and data.get("brand") != f_brand: continue
+            if f_role != "Tous" and data.get("role") != f_role: continue
             if search and name not in search: continue
+            
             filtered[name] = data
 
         items = list(filtered.items())
@@ -735,17 +752,13 @@ def corpo_fleet_page():
     if not df_standard.empty:
         all_roles = sorted(df_standard["Rôle"].unique())
         
-        # --- CORRECTION 1 : REMPLACEMENT DES TABS PAR UN SELECTBOX ---
-        # Anciennement: tabs = st.tabs(all_roles)
         selected_role_view = st.selectbox("📂 Filtrer par Rôle", ["Tout afficher"] + all_roles)
         
-        # Filtrage selon la sélection
         if selected_role_view == "Tout afficher":
             df_to_show = df_standard
         else:
             df_to_show = df_standard[df_standard["Rôle"] == selected_role_view]
             
-        # Groupement
         grp_role = df_to_show.groupby(['Vaisseau']).agg({
             'Propriétaire': lambda x: sorted(x.unique()),
             'id': 'count',
@@ -771,10 +784,16 @@ def corpo_fleet_page():
                 </div>
                 """, unsafe_allow_html=True)
 
-    # --- BARRE DE RECHERCHE ET TABLEAU FINAL ---
-    st.markdown("---")
-    st.markdown("### 📋 DÉTAIL GLOBAL")
+# --- NOUVELLE PAGE DÉDIÉE : REGISTRE GLOBAL ---
+def global_registry_page():
+    st.subheader("📋 REGISTRE GLOBAL & DÉTAILS")
     
+    df = pd.DataFrame(st.session_state.db["fleet"])
+    if df.empty: 
+        st.info("La flotte est vide.")
+        return
+
+    # BARRE DE RECHERCHE ET TABLEAU
     c_search, c_void = st.columns([2, 1])
     with c_search:
         search = st.text_input("🔍 Filtrer la liste globale (Vaisseau, Pilote, Rôle)", "")
@@ -785,6 +804,7 @@ def corpo_fleet_page():
                 df["Propriétaire"].str.lower().str.contains(m) | 
                 df["Rôle"].str.lower().str.contains(m)]
 
+    # Groupement pour l'affichage
     grp = df.groupby(['Vaisseau', 'Source', 'Rôle']).agg({
         'Propriétaire': lambda x: ', '.join(sorted(x.unique())),
         'id': 'count',
@@ -808,17 +828,17 @@ def corpo_fleet_page():
     grp['Valeur Unitaire'] = grp.apply(get_price_display, axis=1)
     final_view = grp[["Visuel", "Vaisseau", "Rôle", "Source", "Propriétaire", "Quantité", "Valeur Unitaire"]]
 
-    # --- CORRECTION 2 : COLONNE IMAGE ELARGIE (width="medium") ---
     st.dataframe(
         final_view,
         column_config={
-            "Visuel": st.column_config.ImageColumn("Aperçu", width="medium"), # <-- C'est ici que ça corrige le bug du menu
+            "Visuel": st.column_config.ImageColumn("Aperçu", width="medium"),
             "Propriétaire": st.column_config.TextColumn("Pilotes"),
             "Quantité": st.column_config.ProgressColumn("Stock", max_value=int(grp["Quantité"].max())),
             "Valeur Unitaire": st.column_config.TextColumn("Valeur (Unité)")
         },
         use_container_width=True,
-        hide_index=True
+        hide_index=True,
+        height=800
     )
 
 # --- MAIN LOOP ---
@@ -829,3 +849,4 @@ else:
     if st.session_state.menu_nav == "CATALOGUE": catalogue_page()
     elif st.session_state.menu_nav == "MON HANGAR": my_hangar_page()
     elif st.session_state.menu_nav == "FLOTTE CORPO": corpo_fleet_page()
+    elif st.session_state.menu_nav == "REGISTRE GLOBAL": global_registry_page()
