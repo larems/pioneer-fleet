@@ -122,7 +122,6 @@ def submit_cart_batch():
 
         new_id = int(time.time() * 1_000_000) + len(new_entries)
         
-        # On ne stocke plus le prix "en dur" pour l'affichage futur, on s'assure juste d'avoir les bonnes clés
         entry = {
             "id": new_id,
             "Propriétaire": pilot,
@@ -178,7 +177,7 @@ def process_fleet_updates(edited_df: pd.DataFrame):
             st.success("✅ Synchronisation terminée")
             time.sleep(0.5); st.rerun()
 
-# --- 4. CSS (Styles Ajustés) ---
+# --- 4. CSS (Style Clean) ---
 bg_img_code = get_local_img_as_base64(BACKGROUND_IMAGE)
 st.markdown(f"""
 <style>
@@ -193,7 +192,7 @@ p, div, span, label, button {{ font-family: 'Rajdhani', sans-serif !important; }
 ::-webkit-scrollbar-thumb {{ background: #163347; border-radius: 4px; }}
 ::-webkit-scrollbar-thumb:hover {{ background: #00d4ff; }}
 
-/* Style Cartes Corpo */
+/* CORPO CARD STYLE */
 .corpo-card {{
     background: linear-gradient(135deg, rgba(4,20,35,0.95), rgba(0,0,0,0.95));
     border: 1px solid #163347;
@@ -211,7 +210,7 @@ p, div, span, label, button {{ font-family: 'Rajdhani', sans-serif !important; }
 .corpo-card-body {{ padding: 12px 14px; font-size: 0.9em; color: #aaa; background: rgba(0,0,0,0.2); }}
 .corpo-pilot-tag {{ display: inline-block; background: rgba(22, 51, 71, 0.8); color: #e0e0e0; padding: 4px 8px; border-radius: 4px; margin: 3px; font-size: 0.85em; border: 1px solid rgba(255,255,255,0.1); }}
 
-/* Style Flagship (Images encore plus grandes) */
+/* FLAGSHIP STYLE */
 .flagship-card {{ border: 2px solid #ffaa00; box-shadow: 0 0 25px rgba(255, 170, 0, 0.15); }}
 .flagship-card .corpo-card-img {{ height: 350px; }}
 .flagship-count {{ background: #ffaa00; }}
@@ -309,7 +308,6 @@ def catalogue_page():
             with cols[i % 2]:
                 img_b64 = get_local_img_as_base64(data.get("img", ""))
                 
-                # Compteur panier
                 count_in_cart = sum(1 for item in st.session_state.cart if item['name'] == name)
                 
                 border = "2px solid #00d4ff" if count_in_cart > 0 else "1px solid #163347"
@@ -325,27 +323,17 @@ def catalogue_page():
                     price_str = f"{pv:,.0f} aUEC" if isinstance(pv, (int, float)) and pv > 0 else "N/A"
                     price_col = "#30e8ff"
 
-                # CORRECTION BUG AFFICHAGE HTML : Utilisation propre de f-string
-                # On prépare le badge 'x3' si nécessaire
+                # CORRECTION HTML : Code simplifié sans indentations complexes
                 badge_html = f"<div style='background:#00d4ff; color:black; font-weight:bold; padding:0 6px; border-radius:4px;'>x{count_in_cart}</div>" if count_in_cart > 0 else ""
                 
-                st.markdown(f"""
-                <div style="background:#041623; border-radius:8px; border:{border}; box-shadow:{shadow}; overflow:hidden; margin-bottom:8px; transition:0.2s;">
-                    <div style="height:150px; background:#000;">
-                        <img src="{img_b64}" style="width:100%; height:100%; object-fit:cover; opacity:{opacity}">
-                    </div>
-                    <div style="padding:10px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <div style="font-weight:bold; color:#fff; font-size:1.1em;">{name}</div>
-                            {badge_html}
-                        </div>
-                        <div style="display:flex; justify-content:space-between; font-size:0.9em; color:#ccc; margin-top:4px;">
-                            <span>{data.get('role','N/A')}</span>
-                            <span style="color:{price_col}; font-weight:bold;">{price_str}</span>
-                        </div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+                card_html = f"""<div style="background:#041623; border-radius:8px; border:{border}; box-shadow:{shadow}; overflow:hidden; margin-bottom:8px; transition:0.2s;">
+<div style="height:150px; background:#000;"><img src="{img_b64}" style="width:100%; height:100%; object-fit:cover; opacity:{opacity}"></div>
+<div style="padding:10px;">
+<div style="display:flex; justify-content:space-between; align-items:center;"><div style="font-weight:bold; color:#fff; font-size:1.1em;">{name}</div>{badge_html}</div>
+<div style="display:flex; justify-content:space-between; font-size:0.9em; color:#ccc; margin-top:4px;"><span>{data.get('role','N/A')}</span><span style="color:{price_col}; font-weight:bold;">{price_str}</span></div>
+</div></div>"""
+                
+                st.markdown(card_html, unsafe_allow_html=True)
 
                 # BOUTONS
                 cb1, cb2 = st.columns(2)
@@ -411,19 +399,19 @@ def my_hangar_page():
         df["Supprimer"] = False
         df['Visuel'] = df['Image'].apply(get_local_img_as_base64)
 
-        # === CORRECTION DES PRIX ===
-        # On ignore les vieilles valeurs de la DB et on reprend les valeurs du catalogue
+        # === CORRECTION DES PRIX (Fix) ===
+        # Lecture temps réel du catalogue pour affichage
         def refresh_price_val(row):
             info = SHIPS_DB.get(row['Vaisseau'], {})
             if row['Source'] == 'STORE':
-                return f"${info.get('price', 0):,.0f}"
+                p = info.get('price', 0)
+                return f"${p:,.0f}" if p else "N/A"
             else:
                 p = info.get('auec_price', 0)
                 return f"{p:,.0f} aUEC" if isinstance(p, (int, float)) else "N/A"
         
         df["Valeur_Actuelle"] = df.apply(refresh_price_val, axis=1)
 
-        # CONFIGURATION PLUS PROPRE (CLEAN)
         col_cfg = {
             "id": st.column_config.NumberColumn("ID", disabled=True),
             "Visuel": st.column_config.ImageColumn("Aperçu", width="small"),
@@ -437,11 +425,9 @@ def my_hangar_page():
         }
         visible_cols = ["Visuel", "Vaisseau", "Rôle", "Source", "Assurance", "Valeur_Actuelle", "Dispo", "Supprimer", "id"]
 
-        # SEPARATION STORE / INGAME
         df_store = df[df["Source"]=="STORE"].copy()
         df_game = df[df["Source"]=="INGAME"].copy()
 
-        # METRIQUES SOMMAIRES
         m1, m2, m3 = st.columns(3)
         m1.metric("Vaisseaux Store", len(df_store))
         m2.metric("Vaisseaux InGame", len(df_game))
@@ -533,7 +519,7 @@ def corpo_fleet_page():
 
     st.markdown("---")
 
-    # --- SECTION FLAGSHIPS (AMIRAUX) ---
+    # --- SECTION FLAGSHIPS ---
     st.markdown("## ⚔️ VAISSEAUX AMIRAUX & CAPITAUX")
     
     df_flagships = df[df["Vaisseau"].isin(FLAGSHIPS_LIST)]
@@ -545,7 +531,7 @@ def corpo_fleet_page():
             'Image': 'first'
         }).reset_index()
 
-        cols = st.columns(3) # GRANDE TAILLE
+        cols = st.columns(3) # IMAGES GEANTES
         for i, row in grp_flags.iterrows():
             with cols[i % 3]:
                 img_b64 = get_local_img_as_base64(row['Image'])
@@ -584,7 +570,7 @@ def corpo_fleet_page():
                     'Image': 'first'
                 }).reset_index()
 
-                # PASSE DE 4 à 3 COLONNES POUR DE PLUS GRANDES IMAGES
+                # IMAGES PLUS GRANDES (3 COLONNES)
                 cols_role = st.columns(3) 
                 for j, row in grp_role.iterrows():
                     with cols_role[j % 3]:
