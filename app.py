@@ -400,6 +400,11 @@ def my_hangar_page():
     
     if my_fleet:
         df = pd.DataFrame(my_fleet)
+        
+        # --- CORRECTION DU BUG ICI ---
+        # Ajout de la colonne 'Supprimer' indispensable pour l'éditeur
+        df["Supprimer"] = False  
+        
         # Nettoyage données
         df["Prix_USD"] = pd.to_numeric(df["Prix_USD"], errors="coerce").fillna(0)
         df["Prix_aUEC"] = pd.to_numeric(df["Prix_aUEC"], errors="coerce").fillna(0)
