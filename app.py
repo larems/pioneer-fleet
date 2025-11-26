@@ -194,27 +194,23 @@ st.markdown(f"""
 .stApp {{ background-image: url("{bg_img_code}"); background-size: cover; background-attachment: fixed; }}
 .stApp::before {{ content: ""; position: absolute; inset: 0; background: radial-gradient(circle at top left, rgba(0, 20, 40, 0.95), rgba(0, 0, 0, 0.98)); z-index: -1; }}
 section[data-testid="stSidebar"] {{ background-color: rgba(5, 10, 18, 0.98); border-right: 1px solid #123; }}
-h1, h2, h3 {{ font-family: 'Orbitron', sans-serif !important; color: #fff !important; text-transform: uppercase; border-bottom: 2px solid rgba(0, 212, 255, 0.2); }}
-p, div, span, label, button {{ font-family: 'Rajdhani', sans-serif !important; }}
+
+/* --- POLICES CORRIGÉES --- */
+/* On applique la police seulement aux textes explicites, PAS aux div/span génériques qui cassent le tableau */
+h1, h2, h3, h4, h5, h6, p, label, button, .stMarkdown, .stRadio {{ 
+    font-family: 'Rajdhani', sans-serif !important; 
+}}
+h1, h2, h3 {{ 
+    font-family: 'Orbitron', sans-serif !important; 
+    color: #fff !important; 
+    text-transform: uppercase; 
+    border-bottom: 2px solid rgba(0, 212, 255, 0.2); 
+}}
 
 /* --- LOCK SIDEBAR : ON TUE TOUS LES BOUTONS DE FERMETURE --- */
-
-/* 1. Cache le bouton chevron/croix à l'intérieur de la sidebar */
-section[data-testid="stSidebar"] button {{
-    display: none !important;
-}}
-
-/* 2. Cache le bouton d'ouverture > en haut à gauche de la page principale */
-[data-testid="collapsedControl"] {{
-    display: none !important;
-}}
-
-/* 3. Cache tout contrôle de collapse spécifique à Streamlit */
-[data-testid="stSidebarCollapsedControl"] {{
-    display: none !important;
-}}
-
-/* --- FIN LOCK --- */
+section[data-testid="stSidebar"] button {{ display: none !important; }}
+[data-testid="collapsedControl"] {{ display: none !important; }}
+[data-testid="stSidebarCollapsedControl"] {{ display: none !important; }}
 
 ::-webkit-scrollbar {{ width: 8px; }}
 ::-webkit-scrollbar-track {{ background: #020408; }}
@@ -842,11 +838,10 @@ def corpo_fleet_page():
         grp['Valeur Unitaire'] = grp.apply(get_price_display, axis=1)
         final_view = grp[["Visuel", "Vaisseau", "Rôle", "Source", "Propriétaire", "Quantité", "Valeur Unitaire"]]
 
-        # --- FIX LARGEUR COLONNE IMAGE POUR LE MENU ---
         st.dataframe(
             final_view,
             column_config={
-                "Visuel": st.column_config.ImageColumn("Aperçu", width=150), # Largeur fixe en pixels
+                "Visuel": st.column_config.ImageColumn("Aperçu", width=150),
                 "Propriétaire": st.column_config.TextColumn("Pilotes"),
                 "Quantité": st.column_config.ProgressColumn("Stock", max_value=int(grp["Quantité"].max())),
                 "Valeur Unitaire": st.column_config.TextColumn("Valeur (Unité)")
@@ -863,4 +858,4 @@ if not st.session_state.current_pilot:
 else:
     if st.session_state.menu_nav == "CATALOGUE": catalogue_page()
     elif st.session_state.menu_nav == "MON HANGAR": my_hangar_page()
-    elif st.session_state.menu_nav == "FLOTTE CORPO": corpo_fleet_page()
+    elif st.session_state.menu_nav == "FLOTTE CORPO": corpo_fleet_page()d
