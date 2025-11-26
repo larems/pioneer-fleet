@@ -15,7 +15,7 @@ st.set_page_config(
 )
 BACKGROUND_IMAGE = "assets/fondecransite.png"
 
-# Liste des vaisseaux considérés comme "Majeurs/Flagships"
+# Liste des vaisseaux considérés comme "Majeurs" (en plus de la règle > 800$)
 FLAGSHIPS_LIST = [
     "Javelin", "Idris-M", "Idris-P", "Kraken", "Kraken Privateer", 
     "890 Jump", "Polaris", "Nautilus", "Hammerhead", "Perseus", "Carrack", "Carrack Expedition",
@@ -109,6 +109,17 @@ def get_current_ship_price(ship_name, price_type):
         val = info.get('auec_price', 0)
         return float(val) if isinstance(val, (int, float)) else 0.0
     return 0.0
+
+def check_is_high_value(ship_name):
+    """Détermine si un vaisseau doit être dans la section Amirale."""
+    # 1. Est-il dans la liste manuelle ?
+    if ship_name in FLAGSHIPS_LIST:
+        return True
+    # 2. Coûte-t-il plus de 800$ ?
+    usd_price = get_current_ship_price(ship_name, 'USD')
+    if usd_price >= 800:
+        return True
+    return False
 
 def submit_cart_batch():
     if not st.session_state.current_pilot:
@@ -224,6 +235,18 @@ p, div, span, label, button {{ font-family: 'Rajdhani', sans-serif !important; }
 .flagship-card {{ border: 2px solid #ffaa00; box-shadow: 0 0 25px rgba(255, 170, 0, 0.15); }}
 .flagship-card .corpo-card-img {{ height: 350px; }}
 .flagship-count {{ background: #ffaa00; }}
+
+/* SEARCH BAR STYLE */
+div[data-testid="stTextInput"] input {{
+    text-align: center;
+    font-family: 'Orbitron';
+    border: 1px solid #333;
+    background-color: #020408;
+}}
+div[data-testid="stTextInput"] input:focus {{
+    border-color: #00d4ff;
+    box-shadow: 0 0 10px rgba(0,212,255,0.3);
+}}
 </style>""", unsafe_allow_html=True)
 
 # --- 5. SESSION STATE ---
@@ -333,7 +356,6 @@ def catalogue_page():
                     price_str = f"{pv:,.0f} aUEC" if isinstance(pv, (int, float)) and pv > 0 else "N/A"
                     price_col = "#30e8ff"
 
-                # Correctif HTML
                 badge_html = f"<div style='background:#00d4ff; color:black; font-weight:bold; padding:0 6px; border-radius:4px;'>x{count_in_cart}</div>" if count_in_cart > 0 else ""
                 card_html = f"<div style='background:#041623; border-radius:8px; border:{border}; box-shadow:{shadow}; overflow:hidden; margin-bottom:8px; transition:0.2s;'><div style='height:150px; background:#000;'><img src='{img_b64}' style='width:100%; height:100%; object-fit:cover; opacity:{opacity}'></div><div style='padding:10px;'><div style='display:flex; justify-content:space-between; align-items:center;'><div style='font-weight:bold; color:#fff; font-size:1.1em;'>{name}</div>{badge_html}</div><div style='display:flex; justify-content:space-between; font-size:0.9em; color:#ccc; margin-top:4px;'><span>{data.get('role','N/A')}</span><span style='color:{price_col}; font-weight:bold;'>{price_str}</span></div></div></div>"
                 
@@ -412,8 +434,6 @@ def my_hangar_page():
             total_usd_personal = 0
             total_auec_personal = 0
             
-            # On calcule sur toute la flotte perso (avant recherche) pour l'affichage global
-            # Note: On utilise les prix du catalogue pour être à jour
             for _, row in df.iterrows():
                 if row['Source'] == 'STORE':
                     total_usd_personal += get_current_ship_price(row['Vaisseau'], 'USD')
@@ -577,7 +597,7 @@ def corpo_fleet_page():
     df = pd.DataFrame(st.session_state.db["fleet"])
     if df.empty: st.info("Aucune donnée."); return
 
-    # CALCUL TOTAL GLOBAL (CORRECTION)
+    # CALCUL TOTAL GLOBAL
     total_usd_global = 0
     total_auec_global = 0
     
@@ -595,10 +615,22 @@ def corpo_fleet_page():
 
     st.markdown("---")
 
-    # --- SECTION FLAGSHIPS ---
-    st.markdown("## ⚔️ VAISSEAUX AMIRAUX & CAPITAUX")
+    # --- SECTION FLAGSHIPS & HIGH VALUE ---
+    st.markdown("""
+    <div style="text-align:center; margin: 30px 0 10px 0;">
+        <div style="font-size: 30px; color: #ffaa00; margin-bottom: -10px;">▼</div>
+        <h2 style="color: #ffaa00; border-bottom: 2px solid #ffaa00; display: inline-block; padding: 0 20px 10px 20px;">
+            FLOTTE AMIRALE & HAUTE VALEUR (> 800$)
+        </h2>
+    </div>
+    """, unsafe_allow_html=True)
     
-    df_flagships = df[df["Vaisseau"].isin(FLAGSHIPS_LIST)]
+    # FILTRE : Liste manuelle OU prix >= 800
+    # On crée une colonne temporaire pour le filtre
+    df['is_flagship'] = df['Vaisseau'].apply(check_is_high_value)
+    
+    df_flagships = df[df['is_flagship'] == True]
+    df_standard = df[df['is_flagship'] == False]
     
     if not df_flagships.empty:
         grp_flags = df_flagships.groupby(['Vaisseau', 'Source']).agg({
@@ -607,7 +639,7 @@ def corpo_fleet_page():
             'Image': 'first'
         }).reset_index()
 
-        cols = st.columns(3) # IMAGES GEANTES
+        cols = st.columns(3)
         for i, row in grp_flags.iterrows():
             with cols[i % 3]:
                 img_b64 = get_local_img_as_base64(row['Image'])
@@ -626,13 +658,11 @@ def corpo_fleet_page():
                 </div>
                 """, unsafe_allow_html=True)
     else:
-        st.info("Aucun vaisseau capital détecté.")
+        st.info("Aucun vaisseau majeur détecté.")
 
     st.markdown("---")
-    st.markdown("## 🚀 FLOTTE OPÉRATIONNELLE")
+    st.markdown("### 🚀 FLOTTE STANDARD")
 
-    df_standard = df[~df["Vaisseau"].isin(FLAGSHIPS_LIST)]
-    
     if not df_standard.empty:
         all_roles = sorted(df_standard["Rôle"].unique())
         tabs = st.tabs(all_roles)
@@ -646,7 +676,6 @@ def corpo_fleet_page():
                     'Image': 'first'
                 }).reset_index()
 
-                # IMAGES PLUS GRANDES (3 COLONNES)
                 cols_role = st.columns(3) 
                 for j, row in grp_role.iterrows():
                     with cols_role[j % 3]:
@@ -665,6 +694,57 @@ def corpo_fleet_page():
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
+
+    # --- BARRE DE RECHERCHE ET TABLEAU FINAL ---
+    st.markdown("---")
+    st.markdown("### 📋 DÉTAIL GLOBAL")
+    
+    # Recherche plus propre
+    c_search, c_void = st.columns([2, 1])
+    with c_search:
+        search = st.text_input("🔍 Filtrer la liste globale (Vaisseau, Pilote, Rôle)", "")
+
+    if search:
+        m = search.lower()
+        df = df[df["Vaisseau"].str.lower().str.contains(m) | 
+                df["Propriétaire"].str.lower().str.contains(m) | 
+                df["Rôle"].str.lower().str.contains(m)]
+
+    # Tableau détaillé
+    grp = df.groupby(['Vaisseau', 'Source', 'Rôle']).agg({
+        'Propriétaire': lambda x: ', '.join(sorted(x.unique())),
+        'id': 'count',
+        'Image': 'first'
+    }).reset_index().rename(columns={'id': 'Quantité'})
+    
+    grp['Visuel'] = grp['Image'].apply(get_local_img_as_base64)
+
+    def get_price_display(row):
+        name = row['Vaisseau']
+        source = row['Source']
+        info = SHIPS_DB.get(name)
+        if not info: return "N/A"
+        if source == "STORE":
+            p = info.get("price", 0)
+            return f"${p:,.0f}" if p else "N/A"
+        else:
+            p = info.get("auec_price", 0)
+            return f"{p:,.0f} aUEC" if isinstance(p, (int, float)) else "N/A"
+
+    grp['Valeur Unitaire'] = grp.apply(get_price_display, axis=1)
+    final_view = grp[["Visuel", "Vaisseau", "Rôle", "Source", "Propriétaire", "Quantité", "Valeur Unitaire"]]
+
+    st.dataframe(
+        final_view,
+        column_config={
+            "Visuel": st.column_config.ImageColumn("Aperçu", width="small"),
+            "Propriétaire": st.column_config.TextColumn("Pilotes"),
+            "Quantité": st.column_config.ProgressColumn("Stock", max_value=int(grp["Quantité"].max())),
+            "Valeur Unitaire": st.column_config.TextColumn("Valeur (Unité)")
+        },
+        use_container_width=True,
+        hide_index=True
+    )
 
 # --- MAIN LOOP ---
 render_sidebar()
