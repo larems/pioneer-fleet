@@ -493,6 +493,7 @@ def corpo_fleet_page():
         m = search.lower()
         df = df[df["Vaisseau"].str.lower().str.contains(m) | df["Propriétaire"].str.lower().str.contains(m)]
 
+    # 1. GROUPEMENT
     grp = df.groupby(['Vaisseau', 'Source', 'Rôle']).agg({
         'Propriétaire': lambda x: ', '.join(sorted(x.unique())),
         'id': 'count',
@@ -500,17 +501,33 @@ def corpo_fleet_page():
     }).reset_index().rename(columns={'id': 'Quantité'})
     
     grp['Visuel'] = grp['Image'].apply(get_local_img_as_base64)
+
+    # 2. CALCUL DYNAMIQUE DU PRIX UNITAIRE (CORRECTION MAJEURE)
+    def get_price_display(row):
+        name = row['Vaisseau']
+        source = row['Source']
+        info = SHIPS_DB.get(name)
+        if not info: return "N/A"
+        
+        if source == "STORE":
+            p = info.get("price", 0)
+            return f"${p:,.0f}" if p else "N/A"
+        else:
+            p = info.get("auec_price", 0)
+            return f"{p:,.0f} aUEC" if isinstance(p, (int, float)) else "N/A"
+
+    grp['Valeur Unitaire'] = grp.apply(get_price_display, axis=1)
     
-    # SÉLECTION DES COLONNES POUR MASQUER "Image" (le chemin texte)
-    # On n'affiche que : Visuel, Vaisseau, Rôle, Source, Pilotes, Quantité
-    final_view = grp[["Visuel", "Vaisseau", "Rôle", "Source", "Propriétaire", "Quantité"]]
+    # 3. VUE FINALE (SANS COLONNE TECHNIQUE "Image")
+    final_view = grp[["Visuel", "Vaisseau", "Rôle", "Source", "Propriétaire", "Quantité", "Valeur Unitaire"]]
 
     st.dataframe(
         final_view,
         column_config={
             "Visuel": st.column_config.ImageColumn("Aperçu", width="small"),
             "Propriétaire": st.column_config.TextColumn("Pilotes"),
-            "Quantité": st.column_config.ProgressColumn("Stock", max_value=int(grp["Quantité"].max()))
+            "Quantité": st.column_config.ProgressColumn("Stock", max_value=int(grp["Quantité"].max())),
+            "Valeur Unitaire": st.column_config.TextColumn("Valeur (Unité)")
         },
         use_container_width=True,
         hide_index=True
