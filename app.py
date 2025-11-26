@@ -295,7 +295,7 @@ def catalogue_page():
                     price_str = f"{pv:,.0f} aUEC" if isinstance(pv, (int, float)) and pv > 0 else "N/A"
                     price_col = "#30e8ff"
 
-                # CORRECTIF HTML : Tout sur une seule ligne pour éviter les erreurs d'indentation
+                # Correctif HTML
                 badge_html = f"<div style='background:#00d4ff; color:black; font-weight:bold; padding:0 6px; border-radius:4px;'>x{count_in_cart}</div>" if count_in_cart > 0 else ""
                 card_html = f"<div style='background:#041623; border-radius:8px; border:{border}; box-shadow:{shadow}; overflow:hidden; margin-bottom:8px; transition:0.2s;'><div style='height:150px; background:#000;'><img src='{img_b64}' style='width:100%; height:100%; object-fit:cover; opacity:{opacity}'></div><div style='padding:10px;'><div style='display:flex; justify-content:space-between; align-items:center;'><div style='font-weight:bold; color:#fff; font-size:1.1em;'>{name}</div>{badge_html}</div><div style='display:flex; justify-content:space-between; font-size:0.9em; color:#ccc; margin-top:4px;'><span>{data.get('role','N/A')}</span><span style='color:{price_col}; font-weight:bold;'>{price_str}</span></div></div></div>"
                 
@@ -380,11 +380,21 @@ def my_hangar_page():
             if df.empty:
                 st.info("Aucun vaisseau trouvé avec cette recherche.")
             else:
+                # --- AJOUT DU TRI PAR PRIX (USD) ---
+                # On récupère le prix USD du catalogue pour chaque vaisseau pour le tri
+                df['Sort_Price'] = df['Vaisseau'].apply(lambda x: SHIPS_DB.get(x, {}).get('price', 0) or 0)
+                # On trie du plus cher au moins cher
+                df = df.sort_values(by='Sort_Price', ascending=False)
+
                 # Groupement pour affichage carte
                 grp_fleet = df.groupby(['Vaisseau', 'Source', 'Assurance']).agg({
                     'id': 'count',
                     'Image': 'first'
                 }).reset_index().rename(columns={'id': 'Quantité'})
+                
+                # Pour garder le tri après le groupement, on doit re-trier le DataFrame groupé
+                grp_fleet['Sort_Price'] = grp_fleet['Vaisseau'].apply(lambda x: SHIPS_DB.get(x, {}).get('price', 0) or 0)
+                grp_fleet = grp_fleet.sort_values(by='Sort_Price', ascending=False)
 
                 # Affichage en grille
                 cols = st.columns(3)
