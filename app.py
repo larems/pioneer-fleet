@@ -206,6 +206,62 @@ p, div, span, label, button {{ font-family: 'Rajdhani', sans-serif !important; }
 ::-webkit-scrollbar-thumb {{ background: #163347; border-radius: 4px; }}
 ::-webkit-scrollbar-thumb:hover {{ background: #00d4ff; }}
 
+/* CATALOG CARD STYLE */
+.catalog-card {{
+    background: #041623;
+    border-radius: 8px;
+    border: 1px solid #163347;
+    overflow: hidden;
+    margin-bottom: 8px;
+    transition: 0.2s;
+}}
+.catalog-card-selected {{
+    border: 2px solid #00d4ff;
+    box-shadow: 0 0 15px rgba(0, 212, 255, 0.4);
+}}
+.catalog-card-img-container {{
+    height: 150px;
+    background: #000;
+}}
+.catalog-card-img {{
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}}
+.catalog-card-body {{
+    padding: 10px;
+}}
+.catalog-card-header {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}}
+.catalog-card-title {{
+    font-weight: bold;
+    color: #fff;
+    font-size: 1.1em;
+}}
+.catalog-card-badge {{
+    background: #00d4ff;
+    color: black;
+    font-weight: bold;
+    padding: 0 6px;
+    border-radius: 4px;
+}}
+.catalog-card-footer {{
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.9em;
+    color: #ccc;
+    margin-top: 4px;
+}}
+/* FIX: Change text color to black when card is selected */
+.catalog-card-selected .catalog-card-title,
+.catalog-card-selected .catalog-card-footer span {{
+    color: #000 !important;
+}}
+
+
 /* CORPO CARD STYLE */
 .corpo-card {{
     background: linear-gradient(135deg, rgba(4,20,35,0.95), rgba(0,0,0,0.95));
@@ -314,7 +370,7 @@ def catalogue_page():
     with col_main:
         st.subheader(f"REGISTRE ({len(st.session_state.cart)} SÉLECTIONNÉS)")
         
-        # BARRE DE RECHERCHE CENTRALE (PLACÉE ICI COMME DEMANDÉ)
+        # BARRE DE RECHERCHE CENTRALE
         search_list = sorted(list(SHIPS_DB.keys()))
         search = st.multiselect("RECHERCHE", search_list, placeholder="🔍 Rechercher un vaisseau...", label_visibility="collapsed")
 
@@ -351,8 +407,8 @@ def catalogue_page():
                 
                 count_in_cart = sum(1 for item in st.session_state.cart if item['name'] == name)
                 
-                border = "2px solid #00d4ff" if count_in_cart > 0 else "1px solid #163347"
-                shadow = "0 0 15px rgba(0, 212, 255, 0.4)" if count_in_cart > 0 else "none"
+                # Determine CSS class based on selection state
+                card_class = "catalog-card catalog-card-selected" if count_in_cart > 0 else "catalog-card"
                 opacity = "1.0"
 
                 if p_source == "STORE":
@@ -364,9 +420,26 @@ def catalogue_page():
                     price_str = f"{pv:,.0f} aUEC" if isinstance(pv, (int, float)) and pv > 0 else "N/A"
                     price_col = "#30e8ff"
 
-                # HTML Card Compact
-                badge_html = f"<div style='background:#00d4ff; color:black; font-weight:bold; padding:0 6px; border-radius:4px;'>x{count_in_cart}</div>" if count_in_cart > 0 else ""
-                card_html = f"<div style='background:#041623; border-radius:8px; border:{border}; box-shadow:{shadow}; overflow:hidden; margin-bottom:8px; transition:0.2s;'><div style='height:150px; background:#000;'><img src='{img_b64}' style='width:100%; height:100%; object-fit:cover; opacity:{opacity}'></div><div style='padding:10px;'><div style='display:flex; justify-content:space-between; align-items:center;'><div style='font-weight:bold; color:#fff; font-size:1.1em;'>{name}</div>{badge_html}</div><div style='display:flex; justify-content:space-between; font-size:0.9em; color:#ccc; margin-top:4px;'><span>{data.get('role','N/A')}</span><span style='color:{price_col}; font-weight:bold;'>{price_str}</span></div></div></div>"
+                # HTML Card with classes for styling
+                badge_html = f"<div class='catalog-card-badge'>x{count_in_cart}</div>" if count_in_cart > 0 else ""
+                
+                card_html = f"""
+                <div class="{card_class}">
+                    <div class="catalog-card-img-container">
+                        <img src="{img_b64}" class="catalog-card-img" style="opacity:{opacity}">
+                    </div>
+                    <div class="catalog-card-body">
+                        <div class="catalog-card-header">
+                            <div class="catalog-card-title">{name}</div>
+                            {badge_html}
+                        </div>
+                        <div class="catalog-card-footer">
+                            <span>{data.get('role','N/A')}</span>
+                            <span style="color:{price_col}; font-weight:bold;">{price_str}</span>
+                        </div>
+                    </div>
+                </div>
+                """
                 
                 st.markdown(card_html, unsafe_allow_html=True)
 
@@ -481,9 +554,7 @@ def my_hangar_page():
                 def render_fleet_grid_editable(dataframe, is_flagship=False):
                     if dataframe.empty: return
                     
-                    # Groupement pour l'affichage (On groupe aussi par Dispo pour permettre la gestion unitaire si besoin,
-                    # ou on groupe juste par type et on gère la dispo globale). 
-                    # ICI: On groupe par (Vaisseau, Source, Assurance, Dispo) pour avoir des piles cohérentes
+                    # Groupement pour l'affichage
                     grp = dataframe.groupby(['Vaisseau', 'Source', 'Assurance', 'Dispo']).agg({
                         'id': 'count',
                         'Image': 'first'
@@ -544,7 +615,6 @@ def my_hangar_page():
                                 new_disp = st.toggle("Disponibilité (Prêt)", value=dispo, key=f"disp_{i}_{name}_{source}_{insurance}")
 
                                 # LOGIQUE DE MISE A JOUR
-                                # Si l'un des deux change, on update la DB
                                 if new_ins != insurance or new_disp != dispo:
                                     update_ship_attributes(st.session_state.current_pilot, name, source, insurance, dispo, new_ins, new_disp)
 
@@ -650,7 +720,7 @@ def my_hangar_page():
                 st.info("Sélectionnez un vaisseau achetable en jeu pour voir la progression.")
 
 def corpo_fleet_page():
-    st.subheader("FLOTTE CORPORATIVE")
+    st.subheader("FLOTTE CORPORATIVE →") # Correction de la flèche ici
     df = pd.DataFrame(st.session_state.db["fleet"])
     if df.empty: st.info("Aucune donnée."); return
 
