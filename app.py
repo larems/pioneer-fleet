@@ -23,13 +23,17 @@ FLAGSHIPS_LIST = [
 ]
 
 # --- 2. GESTION DATABASE (JSONBIN.IO) ---
+# Ton ID spécifique vu sur la capture
 JSONBIN_ID = st.secrets.get("JSONBIN_ID", "6921f0ded0ea881f40f9933f")
 JSONBIN_KEY = st.secrets.get("JSONBIN_KEY", "")
 
 def normalize_db_schema(db: dict) -> dict:
     """Normalise la structure de la DB."""
-    # On s'assure que les clés existent, mais on ne touche pas à admin_code s'il est déjà là
-    db.setdefault("admin_code", "9999") # Fallback au cas où le JSON est vide
+    # On s'assure que les clés existent
+    # Si "admin_code" est déjà dans le JSON (comme sur ta capture), il sera conservé.
+    # Sinon, on met "9999" par défaut.
+    db.setdefault("admin_code", "9999") 
+    
     db.setdefault("users", {})
     db.setdefault("fleet", [])
     db.setdefault("user_data", {}) 
@@ -69,11 +73,14 @@ def load_db_from_cloud():
     if not JSONBIN_KEY:
         st.warning("⚠️ Clé JSONBin.io manquante. Mode hors ligne.")
         return {"users": {}, "fleet": [], "admin_code": "9999"}
+    
+    # URL spécifique à ton BIN
     url = f"https://api.jsonbin.io/v3/b/{JSONBIN_ID}/latest"
     headers = {"X-Master-Key": JSONBIN_KEY}
     try:
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 200:
+            # On récupère le contenu du JSON (qui contient ton admin_code)
             return normalize_db_schema(response.json().get("record", {}))
     except Exception as e:
         st.error(f"Erreur DB: {e}")
@@ -170,7 +177,6 @@ def submit_cart_batch():
     if not st.session_state.current_pilot:
         st.error("Vous devez être connecté.")
         return
-
     if not st.session_state.cart:
         st.warning("Votre panier est vide.")
         return
@@ -231,7 +237,9 @@ def admin_delete_user(target_pilot):
         del db["user_data"][target_pilot]
     
     # 3. Supprimer les vaisseaux
+    initial_len = len(db["fleet"])
     db["fleet"] = [s for s in db["fleet"] if s["Propriétaire"] != target_pilot]
+    deleted_count = initial_len - len(db["fleet"])
     
     # 4. Retirer des équipages
     for s in db["fleet"]:
@@ -239,7 +247,7 @@ def admin_delete_user(target_pilot):
             s["CrewList"].remove(target_pilot)
             
     if save_db_to_cloud(db):
-        st.success(f"Utilisateur {target_pilot} totalement supprimé.")
+        st.success(f"Utilisateur {target_pilot} totalement supprimé ({deleted_count} vaisseaux).")
         time.sleep(2)
         st.rerun()
 
@@ -346,7 +354,9 @@ def render_sidebar():
                 st.session_state.current_pilot = None; st.session_state.cart = []; st.session_state.admin_unlocked = False; st.rerun()
             st.markdown("---")
             
+            # AJOUT MENU ADMIN ET NEED CREW
             nav_opts = ["CATALOGUE", "MON HANGAR", "FLOTTE CORPO", "NEED CREW", "ADMINISTRATION"]
+            
             curr_idx = 0
             if st.session_state.menu_nav in nav_opts:
                 curr_idx = nav_opts.index(st.session_state.menu_nav)
@@ -387,7 +397,6 @@ def home_page():
 def catalogue_page():
     col_filters, col_main, col_cart = st.columns([1, 3.5, 1.5])
     
-    # --- 1. FILTRES (GAUCHE) ---
     with col_filters:
         st.subheader("PARAMÈTRES")
         p_source = st.radio("SOURCE", ["STORE", "INGAME"], index=0 if st.session_state.selected_source == "STORE" else 1)
@@ -418,11 +427,9 @@ def catalogue_page():
         # LOGIQUE DE FILTRAGE
         filtered = {}
         for name, data in SHIPS_DB.items():
-            # Filtres
             if f_brand != "Tous" and data.get("brand") != f_brand: continue
             if f_role != "Tous" and data.get("role") != f_role: continue
             if search and name not in search: continue
-            
             filtered[name] = data
 
         items = list(filtered.items())
@@ -430,7 +437,6 @@ def catalogue_page():
         total_pages = max(1, (len(items) + PER_PAGE - 1) // PER_PAGE)
         if st.session_state.catalog_page >= total_pages: st.session_state.catalog_page = 0
 
-        # PAGINATION
         c1, c2, c3 = st.columns([1, 4, 1])
         with c1: 
             if st.button("◄", disabled=(st.session_state.catalog_page==0)): st.session_state.catalog_page -= 1; st.rerun()
@@ -464,7 +470,6 @@ def catalogue_page():
                     price_str = f"{pv:,.0f} aUEC" if isinstance(pv, (int, float)) and pv > 0 else "N/A"
                     price_col = "#30e8ff"
 
-                # HTML Card Compact
                 badge_html = f"<div style='background:#00d4ff; color:black; font-weight:bold; padding:0 6px; border-radius:4px;'>x{count_in_cart}</div>" if count_in_cart > 0 else ""
                 card_html = f"<div style='background:#041623; border-radius:8px; border:{border}; box-shadow:{shadow}; overflow:hidden; margin-bottom:8px; transition:0.2s;'><div style='height:150px; background:#000;'><img src='{img_b64}' style='width:100%; height:100%; object-fit:cover; opacity:{opacity}'></div><div style='padding:10px;'><div style='display:flex; justify-content:space-between; align-items:center;'><div style='font-weight:bold; color:#fff; font-size:1.1em;'>{name}</div>{badge_html}</div><div style='display:flex; justify-content:space-between; font-size:0.9em; color:#ccc; margin-top:4px;'><span>{data.get('role','N/A')}</span><span style='color:{price_col}; font-weight:bold;'>{price_str}</span></div></div></div>"
                 
@@ -1000,8 +1005,7 @@ def admin_page():
     st.subheader("🔧 ADMINISTRATION")
     
     # 1. Récupération sécurisée du code admin (depuis DB)
-    # Le code doit être présent dans le JSON sous la clé "admin_code"
-    admin_code_db = st.session_state.db.get("admin_code")
+    admin_code_db = st.session_state.db.get("admin_code", "9999")
 
     if not st.session_state.get("admin_unlocked", False):
         pwd = st.text_input("Code d'accès Admin", type="password")
