@@ -15,6 +15,10 @@ st.set_page_config(
 )
 BACKGROUND_IMAGE = "assets/fondecransite.png"
 
+# Code Admin récupéré des secrets (ou défaut pour test local si pas de secrets)
+# AJOUTEZ "admin_code = 'votre_code'" dans .streamlit/secrets.toml
+ADMIN_ACCESS_CODE = st.secrets.get("ADMIN_CODE", "9999") 
+
 # Liste des vaisseaux considérés comme "Majeurs"
 FLAGSHIPS_LIST = [
     "Javelin", "Idris-M", "Idris-P", "Kraken", "Kraken Privateer", 
@@ -39,9 +43,9 @@ def normalize_db_schema(db: dict) -> dict:
         ship.setdefault("Marque", "N/A")
         ship.setdefault("Rôle", "Inconnu")
         
-        # MODIF: FlightReady remplace Dispo
+        # FlightReady remplace Dispo
         ship.setdefault("FlightReady", False) 
-        if "Dispo" in ship: # Migration auto
+        if "Dispo" in ship:
             ship["FlightReady"] = ship.pop("Dispo")
             
         ship.setdefault("Image", "")
@@ -53,7 +57,7 @@ def normalize_db_schema(db: dict) -> dict:
         ship.setdefault("Prix", None)
         ship.setdefault("crew_max", 1)
         
-        # AJOUT: Gestion Crew
+        # NeedCrew
         ship.setdefault("NeedCrew", False)
         ship.setdefault("CrewList", [])
     
@@ -110,7 +114,6 @@ def get_local_img_as_base64(path):
     return "" 
 
 def get_current_ship_price(ship_name, price_type):
-    """Récupère le prix actuel depuis le catalogue."""
     info = SHIPS_DB.get(ship_name, {})
     if price_type == 'USD':
         return float(info.get('price', 0) or 0)
@@ -120,36 +123,33 @@ def get_current_ship_price(ship_name, price_type):
     return 0.0
 
 def check_is_high_value(ship_name):
-    """Détermine si un vaisseau doit être dans la section Amirale."""
     if ship_name in FLAGSHIPS_LIST: return True
     usd_price = get_current_ship_price(ship_name, 'USD')
     if usd_price >= 800: return True
     return False
 
-def update_ship_attributes(pilot, ship_name, source, old_insurance, old_ready, old_need, new_insurance, new_ready, new_need):
-    """Met à jour l'assurance, FlightReady et NeedCrew."""
+def update_ship_attributes(pilot, ship_name, source, old_ins, old_ready, old_need, new_ins, new_ready, new_need):
     updated = False
     for s in st.session_state.db["fleet"]:
         if (s["Propriétaire"] == pilot and 
             s["Vaisseau"] == ship_name and 
             s["Source"] == source and 
-            s["Assurance"] == old_insurance and
+            s["Assurance"] == old_ins and
             s.get("FlightReady", False) == old_ready and
             s.get("NeedCrew", False) == old_need):
             
-            s["Assurance"] = new_insurance
+            s["Assurance"] = new_ins
             s["FlightReady"] = bool(new_ready)
             s["NeedCrew"] = bool(new_need)
             updated = True
     
     if updated:
         save_db_to_cloud(st.session_state.db)
-        st.toast("Vaisseau mis à jour !", icon="✅")
+        st.toast("Mise à jour effectuée !", icon="✅")
         time.sleep(0.5)
         st.rerun()
 
 def toggle_crew_signup(ship_id, pilot_name, max_slots):
-    """Gère l'inscription au Crew avec limite max."""
     for s in st.session_state.db["fleet"]:
         if s["id"] == ship_id:
             current_crew = s.get("CrewList", [])
@@ -161,7 +161,7 @@ def toggle_crew_signup(ship_id, pilot_name, max_slots):
                     s["CrewList"].append(pilot_name)
                     st.toast("Bienvenue à bord !", icon="🚀")
                 else:
-                    st.error("Le vaisseau est complet !")
+                    st.error("Vaisseau complet !")
                     return
             save_db_to_cloud(st.session_state.db)
             time.sleep(0.5)
@@ -172,7 +172,6 @@ def submit_cart_batch():
     if not st.session_state.current_pilot:
         st.error("Vous devez être connecté.")
         return
-
     if not st.session_state.cart:
         st.warning("Votre panier est vide.")
         return
@@ -196,7 +195,9 @@ def submit_cart_batch():
             "Vaisseau": ship_name,
             "Marque": info.get("brand", "N/A"),
             "Rôle": info.get("role", "Inconnu"),
-            "FlightReady": False, # Nouveau
+            "FlightReady": False, 
+            "NeedCrew": False,    
+            "CrewList": [],
             "Image": info.get("img", ""),
             "Visuel": "",
             "Source": source,
@@ -205,8 +206,6 @@ def submit_cart_batch():
             "Assurance": insurance,
             "Prix": None,
             "crew_max": info.get("crew_max", 1),
-            "NeedCrew": False,
-            "CrewList": []
         }
         new_entries.append(entry)
 
@@ -218,6 +217,27 @@ def submit_cart_batch():
         st.session_state.cart = []
         time.sleep(1)
         st.rerun()
+        
+# --- FONCTION ADMIN (AJOUTÉE) ---
+def admin_delete_user(target_pilot):
+    db = st.session_state.db
+    # 1. Supprimer User
+    if target_pilot in db["users"]: del db["users"][target_pilot]
+    # 2. Supprimer Data
+    if target_pilot in db["user_data"]: del db["user_data"][target_pilot]
+    # 3. Supprimer Vaisseaux
+    initial_len = len(db["fleet"])
+    db["fleet"] = [s for s in db["fleet"] if s["Propriétaire"] != target_pilot]
+    deleted_count = initial_len - len(db["fleet"])
+    # 4. Retirer des Crews
+    for s in db["fleet"]:
+        if target_pilot in s.get("CrewList", []):
+            s["CrewList"].remove(target_pilot)
+            
+    if save_db_to_cloud(db):
+        st.success(f"Utilisateur {target_pilot} supprimé ({deleted_count} vaisseaux retirés).")
+        time.sleep(2)
+        st.rerun()
 
 # --- 4. CSS ---
 bg_img_code = get_local_img_as_base64(BACKGROUND_IMAGE)
@@ -228,38 +248,18 @@ st.markdown(f"""
 .stApp::before {{ content: ""; position: absolute; inset: 0; background: radial-gradient(circle at top left, rgba(0, 20, 40, 0.95), rgba(0, 0, 0, 0.98)); z-index: -1; }}
 section[data-testid="stSidebar"] {{ background-color: rgba(5, 10, 18, 0.98); border-right: 1px solid #123; }}
 
-/* POLICES (SAFE MODE) */
-h1, h2, h3, h4, h5, h6, p, label, button, .stMarkdown, .stRadio {{ 
-    font-family: 'Rajdhani', sans-serif !important; 
-}}
-h1, h2, h3 {{ 
-    font-family: 'Orbitron', sans-serif !important; 
-    color: #fff !important; 
-    text-transform: uppercase; 
-    border-bottom: 2px solid rgba(0, 212, 255, 0.2); 
-}}
-
-/* LOCK SIDEBAR */
-section[data-testid="stSidebar"] button {{ display: none !important; }}
-[data-testid="collapsedControl"] {{ display: none !important; }}
-[data-testid="stSidebarCollapsedControl"] {{ display: none !important; }}
-
+h1, h2, h3 {{ font-family: 'Orbitron', sans-serif !important; color: #fff !important; text-transform: uppercase; border-bottom: 2px solid rgba(0, 212, 255, 0.2); }}
+p, div, span, label, button {{ font-family: 'Rajdhani', sans-serif !important; }}
 ::-webkit-scrollbar {{ width: 8px; }}
 ::-webkit-scrollbar-track {{ background: #020408; }}
 ::-webkit-scrollbar-thumb {{ background: #163347; border-radius: 4px; }}
 ::-webkit-scrollbar-thumb:hover {{ background: #00d4ff; }}
 
-/* NAV */
-div[data-testid="stRadio"] > label {{ display: none; }}
-div[data-testid="stRadio"] div[role="radiogroup"] > label {{
-    background: rgba(255,255,255,0.05); padding: 10px; border-radius: 6px; border: 1px solid transparent; margin-bottom: 5px; transition: all 0.3s;
-}}
-div[data-testid="stRadio"] div[role="radiogroup"] > label:hover {{ border-color: #00d4ff; background: rgba(0, 212, 255, 0.1); }}
-div[data-testid="stRadio"] div[role="radiogroup"] > label[data-checked="true"] {{
-    background: linear-gradient(90deg, rgba(0, 212, 255, 0.2), transparent); border-left: 4px solid #00d4ff; color: #00d4ff !important;
-}}
+/* LOCK SIDEBAR */
+section[data-testid="stSidebar"] button {{ display: none !important; }}
+[data-testid="collapsedControl"] {{ display: none !important; }}
 
-/* CARDS */
+/* CORPO CARD STYLE */
 .corpo-card {{
     background: linear-gradient(135deg, rgba(4,20,35,0.95), rgba(0,0,0,0.95));
     border: 1px solid #163347;
@@ -270,22 +270,56 @@ div[data-testid="stRadio"] div[role="radiogroup"] > label[data-checked="true"] {
     transition: transform 0.2s, box-shadow 0.2s;
 }}
 .corpo-card:hover {{ transform: translateY(-4px); border-color: #00d4ff; box-shadow: 0 0 15px rgba(0, 212, 255, 0.15); }}
-.corpo-card-img {{ width: 100%; height: 200px; object-fit: cover; border-bottom: 1px solid #163347; }} 
+.corpo-card-img {{ width: 100%; height: 220px; object-fit: cover; border-bottom: 1px solid #163347; }} 
 .corpo-card-header {{ padding: 10px 14px; background: rgba(0,0,0,0.4); display:flex; justify-content:space-between; align-items:center; }}
 .corpo-card-title {{ font-family: 'Orbitron'; font-size: 1.2em; color: white; font-weight: bold; text-shadow: 0 2px 4px black; }}
 .corpo-card-count {{ background: #00d4ff; color: #000; padding: 4px 10px; border-radius: 6px; font-weight: bold; font-family: 'Orbitron'; box-shadow: 0 0 10px rgba(0,212,255,0.4); }}
 .corpo-card-body {{ padding: 12px 14px; font-size: 0.9em; color: #aaa; background: rgba(0,0,0,0.2); }}
 .corpo-pilot-tag {{ display: inline-block; background: rgba(22, 51, 71, 0.8); color: #e0e0e0; padding: 4px 8px; border-radius: 4px; margin: 3px; font-size: 0.85em; border: 1px solid rgba(255,255,255,0.1); }}
 
+/* FLAGSHIP STYLE */
 .flagship-card {{ border: 2px solid #ffaa00; box-shadow: 0 0 25px rgba(255, 170, 0, 0.15); }}
 .flagship-card .corpo-card-img {{ height: 350px; }}
 .flagship-count {{ background: #ffaa00; }}
 
+/* CREW CARD STYLE */
 .crew-card {{ border: 1px solid #ff0055 !important; box-shadow: 0 0 15px rgba(255, 0, 85, 0.2); }}
 .crew-tag {{ background: #ff0055; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.8em; font-weight: bold; margin-left: 5px; }}
 
-div[data-testid="stTextInput"] input {{ text-align: center; font-family: 'Orbitron'; border: 1px solid #333; background-color: #020408; }}
-div[data-testid="stSelectbox"] > div > div {{ background-color: rgba(0,0,0,0.5); border: 1px solid #333; }}
+/* SEARCH BAR STYLE */
+div[data-testid="stTextInput"] input {{
+    text-align: center;
+    font-family: 'Orbitron';
+    border: 1px solid #333;
+    background-color: #020408;
+}}
+div[data-testid="stTextInput"] input:focus {{
+    border-color: #00d4ff;
+    box-shadow: 0 0 10px rgba(0,212,255,0.3);
+}}
+
+/* CUSTOM SELECTBOX IN CARDS */
+div[data-testid="stSelectbox"] > div > div {{
+    background-color: rgba(0,0,0,0.5);
+    border: 1px solid #333;
+}}
+
+/* NAVIGATION STYLE */
+div[data-testid="stRadio"] > label {{ display: none; }}
+div[data-testid="stRadio"] div[role="radiogroup"] > label {{
+    background: rgba(255,255,255,0.05);
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    margin-bottom: 5px;
+    transition: all 0.3s;
+}}
+div[data-testid="stRadio"] div[role="radiogroup"] > label:hover {{ border-color: #00d4ff; background: rgba(0, 212, 255, 0.1); }}
+div[data-testid="stRadio"] div[role="radiogroup"] > label[data-checked="true"] {{
+    background: linear-gradient(90deg, rgba(0, 212, 255, 0.2), transparent);
+    border-left: 4px solid #00d4ff;
+    color: #00d4ff !important;
+}}
 </style>""", unsafe_allow_html=True)
 
 # --- 5. SESSION STATE ---
@@ -295,6 +329,7 @@ if "menu_nav" not in st.session_state: st.session_state.menu_nav = "CATALOGUE"
 if "selected_source" not in st.session_state: st.session_state.selected_source = "STORE"
 if "selected_insurance" not in st.session_state: st.session_state.selected_insurance = "LTI"
 if "cart" not in st.session_state: st.session_state.cart = [] 
+if "admin_unlocked" not in st.session_state: st.session_state.admin_unlocked = False # ADMIN STATE
 
 # --- 6. SIDEBAR ---
 def render_sidebar():
@@ -303,12 +338,11 @@ def render_sidebar():
         if st.session_state.current_pilot:
             st.markdown(f"<div style='color:#00d4ff; font-weight:bold; margin-bottom:10px;'>PILOTE: {st.session_state.current_pilot}</div>", unsafe_allow_html=True)
             if st.button("DÉCONNEXION", use_container_width=True):
-                st.session_state.current_pilot = None; st.session_state.cart = []; st.rerun()
+                st.session_state.current_pilot = None; st.session_state.cart = []; st.session_state.admin_unlocked = False; st.rerun()
             st.markdown("---")
             
-            # AJOUT DE "NEED CREW" EN DERNIER
-            nav_opts = ["CATALOGUE", "MON HANGAR", "FLOTTE CORPO", "NEED CREW"]
-            
+            # AJOUT MENU ADMIN
+            nav_opts = ["CATALOGUE", "MON HANGAR", "FLOTTE CORPO", "NEED CREW", "ADMINISTRATION"]
             curr_idx = 0
             if st.session_state.menu_nav in nav_opts:
                 curr_idx = nav_opts.index(st.session_state.menu_nav)
@@ -384,6 +418,7 @@ def catalogue_page():
             if f_brand != "Tous" and data.get("brand") != f_brand: continue
             if f_role != "Tous" and data.get("role") != f_role: continue
             if search and name not in search: continue
+            
             filtered[name] = data
 
         items = list(filtered.items())
@@ -411,6 +446,7 @@ def catalogue_page():
                 img_b64 = get_local_img_as_base64(data.get("img", ""))
                 
                 count_in_cart = sum(1 for item in st.session_state.cart if item['name'] == name)
+                
                 border = "2px solid #00d4ff" if count_in_cart > 0 else "1px solid #163347"
                 shadow = "0 0 15px rgba(0, 212, 255, 0.4)" if count_in_cart > 0 else "none"
                 opacity = "1.0"
@@ -459,6 +495,7 @@ def catalogue_page():
             st.info("Panier vide.")
         else:
             st.markdown(f"### 🛒 PANIER ({len(st.session_state.cart)})")
+            
             cart_counts = {}
             for item in st.session_state.cart:
                 key = (item['name'], item['source'], item['insurance'], item['price_disp'])
@@ -501,6 +538,7 @@ def my_hangar_page():
             # CALCUL TOTAL (USD & aUEC) SUR LA FLOTTE FILTRÉE
             total_usd_personal = 0
             total_auec_personal = 0
+            
             for _, row in df.iterrows():
                 if row['Source'] == 'STORE':
                     total_usd_personal += get_current_ship_price(row['Vaisseau'], 'USD')
@@ -601,20 +639,25 @@ def my_hangar_page():
                             c_edit, c_del = st.columns([3, 1])
                             
                             with c_edit:
+                                # Sélecteur d'Assurance
                                 ins_opts = ["LTI", "10 Ans", "2 ans", "6 Mois", "2 Mois", "Standard"]
                                 new_ins = st.selectbox("Assurance", ins_opts, index=ins_opts.index(insurance) if insurance in ins_opts else 5, key=f"ins_{i}_{name}_{source}_{is_ready}", label_visibility="collapsed")
                                 
                                 c_t1, c_t2 = st.columns(2)
                                 with c_t1:
+                                    # MODIF: Flight Ready au lieu de Prêt
                                     new_ready = st.toggle("🚀 Flight Ready", value=is_ready, key=f"ready_{i}_{name}_{source}")
                                 with c_t2:
+                                    # AJOUT: Need Crew
                                     new_need = st.toggle("📢 Search Crew", value=need_crew, key=f"need_{i}_{name}_{source}")
 
+                                # LOGIQUE DE MISE A JOUR
                                 if new_ins != insurance or new_ready != is_ready or new_need != need_crew:
                                     update_ship_attributes(st.session_state.current_pilot, name, source, insurance, is_ready, need_crew, new_ins, new_ready, new_need)
 
                             with c_del:
                                 if st.button("🗑️", key=f"del_{i}_{name}_{source}_{is_ready}", help="Retirer un exemplaire"):
+                                    # Logique de suppression unitaire
                                     to_remove_id = None
                                     for s in st.session_state.db["fleet"]:
                                         if (s["Propriétaire"] == st.session_state.current_pilot and 
@@ -718,6 +761,7 @@ def need_crew_page():
     st.subheader("📢 OFFRES D'ÉQUIPAGE (NEED CREW)")
     st.markdown("Rejoignez les équipages formés par les membres de la corporation.")
     
+    # Filtrer les vaisseaux NeedCrew = True
     crew_ships = [s for s in st.session_state.db["fleet"] if s.get("NeedCrew") == True]
     
     if not crew_ships:
@@ -947,8 +991,66 @@ def corpo_fleet_page():
         
         st.dataframe(pd.DataFrame(data_members), use_container_width=True, hide_index=True)
 
+# --- PAGE ADMIN (AJOUTÉE) ---
+def admin_page():
+    st.subheader("🔧 ADMINISTRATION")
+    
+    # Zone de connexion Admin
+    if "admin_unlocked" not in st.session_state:
+        st.session_state.admin_unlocked = False
+
+    if not st.session_state.admin_unlocked:
+        pwd = st.text_input("Code d'accès Admin", type="password")
+        if st.button("ACCÉDER"):
+            # Vérification avec le code secret (stocké dans secrets.toml ou variables d'env)
+            if pwd == ADMIN_ACCESS_CODE:
+                st.session_state.admin_unlocked = True
+                st.rerun()
+            else:
+                st.error("Code incorrect.")
+    else:
+        st.warning("⚠️ ZONE DANGEREUSE : Actions irréversibles")
+        
+        # Liste des utilisateurs pour suppression
+        users_list = list(st.session_state.db["users"].keys())
+        if not users_list:
+            st.info("Aucun utilisateur enregistré.")
+        else:
+            target_user = st.selectbox("Sélectionner un membre à supprimer", ["-- Choisir --"] + users_list)
+            
+            if target_user != "-- Choisir --":
+                st.error(f"Vous allez supprimer définitivement le compte de : {target_user}")
+                st.markdown("Cela effacera : \n- Son compte (Login/Pin)\n- Ses données personnelles (Solde, Objectifs)\n- Tous ses vaisseaux de la flotte\n- Ses inscriptions dans les équipages")
+                
+                if st.button(f"CONFIRMER LA SUPPRESSION DE {target_user}", type="primary"):
+                    db = st.session_state.db
+                    
+                    # 1. Supprimer User
+                    if target_user in db["users"]: del db["users"][target_user]
+                    # 2. Supprimer Data
+                    if target_user in db["user_data"]: del db["user_data"][target_user]
+                    # 3. Supprimer Vaisseaux
+                    initial_len = len(db["fleet"])
+                    db["fleet"] = [s for s in db["fleet"] if s["Propriétaire"] != target_user]
+                    deleted_count = initial_len - len(db["fleet"])
+                    # 4. Retirer des Crews
+                    for s in db["fleet"]:
+                        if target_user in s.get("CrewList", []):
+                            s["CrewList"].remove(target_user)
+                            
+                    if save_db_to_cloud(db):
+                        st.success(f"Utilisateur {target_user} supprimé avec succès ({deleted_count} vaisseaux retirés).")
+                        time.sleep(2)
+                        st.rerun()
+        
+        st.markdown("---")
+        if st.button("Se déconnecter de l'Admin"):
+            st.session_state.admin_unlocked = False
+            st.rerun()
+
 # --- MAIN LOOP ---
 render_sidebar()
+
 if not st.session_state.current_pilot:
     home_page()
 else:
@@ -956,3 +1058,4 @@ else:
     elif st.session_state.menu_nav == "MON HANGAR": my_hangar_page()
     elif st.session_state.menu_nav == "FLOTTE CORPO": corpo_fleet_page()
     elif st.session_state.menu_nav == "NEED CREW": need_crew_page()
+    elif st.session_state.menu_nav == "ADMINISTRATION": admin_page()
