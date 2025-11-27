@@ -159,7 +159,7 @@ def toggle_crew_signup(ship_id, pilot_name, max_slots):
                     s["CrewList"].append(pilot_name)
                     st.toast("Bienvenue à bord !", icon="🚀")
                 else:
-                    st.error("Le vaisseau est complet !")
+                    st.error("Vaisseau complet !")
                     return
             save_db_to_cloud(st.session_state.db)
             time.sleep(0.5)
@@ -218,7 +218,6 @@ def submit_cart_batch():
 
 # --- FONCTIONS ADMIN ---
 def admin_delete_user(target_pilot):
-    """Supprime toutes les traces d'un utilisateur."""
     db = st.session_state.db
     
     if target_pilot in db["users"]: del db["users"][target_pilot]
@@ -341,12 +340,7 @@ def render_sidebar():
             st.markdown("---")
             
             nav_opts = ["CATALOGUE", "MON HANGAR", "FLOTTE CORPO", "NEED CREW", "ADMINISTRATION"]
-            
-            curr_idx = 0
-            if st.session_state.menu_nav in nav_opts:
-                curr_idx = nav_opts.index(st.session_state.menu_nav)
-            else:
-                st.session_state.menu_nav = "CATALOGUE"
+            curr_idx = nav_opts.index(st.session_state.menu_nav) if st.session_state.menu_nav in nav_opts else 0
             
             nav = st.radio("NAVIGATION", nav_opts, index=curr_idx, label_visibility="collapsed")
             
@@ -370,11 +364,12 @@ def home_page():
             corpo_pass = st.text_input("Code Corporation", type="password")
             
             if st.form_submit_button("SE CONNECTER", type="primary"):
+                # Vérif code corpo
                 real_corpo = st.session_state.db.get("corpo_code", "APQ8M3")
                 if corpo_pass != real_corpo:
                     st.error("Code Corporation incorrect.")
                     st.stop()
-
+                
                 if not pseudo or not pin.isdigit(): st.error("Format invalide.")
                 else:
                     users = st.session_state.db["users"]
@@ -400,7 +395,7 @@ def catalogue_page():
         f_role = st.selectbox("RÔLE", ["Tous"] + all_roles)
         
     with col_main:
-        st.subheader(f"REGISTRE ({len(st.session_state.cart)} SÉLECTIONNÉS)")
+        st.subheader(f"REGISTRE ({len(st.session_state.cart)})")
         search = st.multiselect("RECHERCHE", sorted(list(SHIPS_DB.keys())), placeholder="🔍 Vaisseau...", label_visibility="collapsed")
         filtered = {}
         for name, data in SHIPS_DB.items():
@@ -442,37 +437,14 @@ def catalogue_page():
                     st.rerun()
 
     with col_cart:
-        st.subheader("VALIDATION")
-        if st.session_state.current_pilot:
-            p_data = st.session_state.db.get("user_data", {}).get(st.session_state.current_pilot, {})
-            st.markdown(f"💳 Solde : <span style='color:#30e8ff'>{p_data.get('auec_balance', 0):,.0f} aUEC</span>", unsafe_allow_html=True)
-        st.markdown("---")
-
-        if not st.session_state.cart:
-            st.info("Panier vide.")
+        st.subheader("PANIER")
+        if not st.session_state.cart: st.info("Vide")
         else:
-            st.markdown(f"### 🛒 PANIER ({len(st.session_state.cart)})")
-            cart_counts = {}
             for item in st.session_state.cart:
-                # FIX ERROR HERE (Adding safe .get for old items)
                 p_disp = item.get('price_disp', 'N/A')
-                key = (item['name'], item['source'], item['insurance'], p_disp)
-                cart_counts[key] = cart_counts.get(key, 0) + 1
-            
-            for (c_name, c_src, c_ins, c_prc), count in cart_counts.items():
-                st.markdown(f"""
-                <div style="background:rgba(255,255,255,0.05); padding:6px; border-radius:4px; margin-bottom:4px; border-left:3px solid #00d4ff; display:flex; justify-content:space-between; align-items:center;">
-                    <div>
-                        <b>{c_name}</b> <span style="background:#333; padding:1px 5px; border-radius:3px;">x{count}</span><br>
-                        <span style="font-size:0.8em; color:#aaa;">{c_src} | {c_ins} | {c_prc}</span>
-                    </div>
-                </div>""", unsafe_allow_html=True)
-            
-            st.markdown("---")
-            if st.button(f"💾 ENREGISTRER TOUT ({len(st.session_state.cart)})", type="primary", use_container_width=True):
-                submit_cart_batch()
-            if st.button("🗑️ Vider", use_container_width=True):
-                st.session_state.cart = []; st.rerun()
+                st.markdown(f"<div style='border-left:2px solid #00d4ff; padding-left:5px; margin-bottom:5px;'>{item['name']} <br><span style='font-size:0.8em; color:#888'>{item['source']}</span></div>", unsafe_allow_html=True)
+            if st.button("VALIDER TOUT", type="primary", use_container_width=True): submit_cart_batch()
+            if st.button("VIDER", use_container_width=True): st.session_state.cart = []; st.rerun()
 
 def my_hangar_page():
     st.subheader(f"HANGAR LOGISTIQUE | {st.session_state.current_pilot}")
@@ -489,109 +461,78 @@ def my_hangar_page():
             st.info("Hangar vide.")
         else:
             df = pd.DataFrame(my_fleet)
-            total_usd_personal = 0
-            total_auec_personal = 0
-            for _, row in df.iterrows():
-                if row['Source'] == 'STORE': total_usd_personal += get_current_ship_price(row['Vaisseau'], 'USD')
-                elif row['Source'] == 'INGAME': total_auec_personal += get_current_ship_price(row['Vaisseau'], 'aUEC')
-
-            col_m1, col_m2, col_m3 = st.columns(3)
-            col_m1.metric("VALEUR PLEDGE (USD)", f"${total_usd_personal:,.0f}")
-            col_m2.metric("VALEUR IN-GAME (aUEC)", f"{total_auec_personal:,.0f}")
-            col_m3.metric("VAISSEAUX", len(df))
-            st.markdown("---")
-
             if search_hangar:
                 m = search_hangar.lower()
                 df = df[df["Vaisseau"].str.lower().str.contains(m) | df["Rôle"].str.lower().str.contains(m) | df["Source"].str.lower().str.contains(m)]
 
-            if df.empty:
-                st.info("Aucun vaisseau trouvé avec cette recherche.")
-            else:
-                df['is_flagship'] = df['Vaisseau'].apply(check_is_high_value)
-                df_flags = df[df['is_flagship'] == True].copy()
-                df_std = df[df['is_flagship'] == False].copy()
-                df_flags = df_flags.sort_values(by='Vaisseau')
-                df_std = df_std.sort_values(by='Vaisseau')
-
-                def render_fleet_grid_editable(dataframe, is_flagship=False):
-                    if dataframe.empty: return
+            df['is_flagship'] = df['Vaisseau'].apply(check_is_high_value)
+            grp = df.groupby(['Vaisseau', 'Source', 'Assurance', 'FlightReady', 'NeedCrew']).agg({
+                'id': 'count', 'Image': 'first', 'crew_max': 'max'
+            }).reset_index().rename(columns={'id': 'Quantité'})
+            
+            cols = st.columns(3)
+            for i, row in grp.iterrows():
+                with cols[i % 3]:
+                    name = row['Vaisseau']
+                    source = row['Source']
+                    insurance = row['Assurance']
+                    is_ready = row['FlightReady']
+                    need_crew = row['NeedCrew']
+                    count = row['Quantité']
+                    max_slots = int(row['crew_max']) if row['crew_max'] else 1
                     
-                    # MODIF: Groupement FlightReady + NeedCrew
-                    grp = dataframe.groupby(['Vaisseau', 'Source', 'Assurance', 'FlightReady', 'NeedCrew']).agg({
-                        'id': 'count', 'Image': 'first', 'crew_max': 'max'
-                    }).reset_index().rename(columns={'id': 'Quantité'})
+                    img_path = SHIPS_DB.get(name, {}).get('img', '')
+                    img_b64 = get_local_img_as_base64(img_path)
+
+                    info = SHIPS_DB.get(name, {})
+                    p_display = f"${info.get('price', 0):,.0f} USD" if source == 'STORE' else f"{info.get('auec_price', 0):,.0f} aUEC"
+                    p_col = "#00d4ff" if source == 'STORE' else "#30e8ff"
                     
-                    cols = st.columns(3)
-                    for i, row in grp.iterrows():
-                        with cols[i % 3]:
-                            name = row['Vaisseau']
-                            source = row['Source']
-                            insurance = row['Assurance']
-                            is_ready = row['FlightReady']
-                            need_crew = row['NeedCrew']
-                            count = row['Quantité']
-                            max_slots = int(row['crew_max']) if row['crew_max'] else 1
-                            
-                            img_path = SHIPS_DB.get(name, {}).get('img', '')
-                            img_b64 = get_local_img_as_base64(img_path)
+                    card_class = "corpo-card flagship-card" if df.iloc[0]['is_flagship'] else "corpo-card"
+                    if need_crew: card_class += " crew-card"
+                    img_style = "height:350px;" if df.iloc[0]['is_flagship'] else "height:200px;"
+                    crew_badge = f"<span class='crew-tag'>CREW MAX: {max_slots}</span>" if need_crew else ""
 
-                            info = SHIPS_DB.get(name, {})
-                            p_display = f"${info.get('price', 0):,.0f} USD" if source == 'STORE' else f"{info.get('auec_price', 0):,.0f} aUEC"
-                            p_col = "#00d4ff" if source == 'STORE' else "#30e8ff"
-                            
-                            card_class = "corpo-card flagship-card" if is_flagship else "corpo-card"
-                            if need_crew: card_class += " crew-card"
-                            img_style = "height:350px;" if is_flagship else "height:200px;"
-                            crew_badge = f"<span class='crew-tag'>CREW MAX: {max_slots}</span>" if need_crew else ""
+                    st.markdown(f"""
+                    <div class="{card_class}">
+                        <img src="{img_b64}" class="corpo-card-img" style="{img_style}">
+                        <div class="corpo-card-header">
+                            <span class="corpo-card-title">{name}</span>
+                            <span class="corpo-card-count">x{count}</span>
+                        </div>
+                        <div class="corpo-card-body">
+                            <div style="display:flex; justify-content:space-between;">
+                                <span>{source}</span>
+                                <span style="color:{p_col}; font-weight:bold;">{p_display}</span>
+                            </div>
+                            <div style="margin-top:5px;">{crew_badge}</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    c_edit, c_del = st.columns([3, 1])
+                    with c_edit:
+                        ins_opts = ["LTI", "10 Ans", "2 ans", "6 Mois", "2 Mois", "Standard"]
+                        new_ins = st.selectbox("Assurance", ins_opts, index=ins_opts.index(insurance) if insurance in ins_opts else 5, key=f"ins_{i}_{name}_{source}_{is_ready}", label_visibility="collapsed")
+                        
+                        c_t1, c_t2 = st.columns(2)
+                        with c_t1:
+                            new_ready = st.toggle("🚀 Flight Ready", value=is_ready, key=f"ready_{i}_{name}_{source}")
+                        with c_t2:
+                            new_need = st.toggle("📢 Search Crew", value=need_crew, key=f"need_{i}_{name}_{source}")
 
-                            st.markdown(f"""
-                            <div class="{card_class}">
-                                <img src="{img_b64}" class="corpo-card-img" style="{img_style}">
-                                <div class="corpo-card-header">
-                                    <span class="corpo-card-title">{name}</span>
-                                    <span class="{st.secrets.get('dummy','corpo-card-count')}">x{count}</span>
-                                </div>
-                                <div class="corpo-card-body">
-                                    <div style="display:flex; justify-content:space-between;">
-                                        <span>{source}</span>
-                                        <span style="color:{p_col}; font-weight:bold;">{p_display}</span>
-                                    </div>
-                                    <div style="margin-top:5px;">{crew_badge}</div>
-                                </div>
-                            </div>""", unsafe_allow_html=True)
-                            
-                            c_edit, c_del = st.columns([3, 1])
-                            with c_edit:
-                                ins_opts = ["LTI", "10 Ans", "2 ans", "6 Mois", "2 Mois", "Standard"]
-                                new_ins = st.selectbox("Assurance", ins_opts, index=ins_opts.index(insurance) if insurance in ins_opts else 5, key=f"ins_{i}_{name}_{source}_{is_ready}", label_visibility="collapsed")
-                                c_t1, c_t2 = st.columns(2)
-                                with c_t1:
-                                    new_ready = st.toggle("🚀 Flight Ready", value=is_ready, key=f"ready_{i}_{name}_{source}")
-                                with c_t2:
-                                    new_need = st.toggle("📢 Search Crew", value=need_crew, key=f"need_{i}_{name}_{source}")
+                        if new_ins != insurance or new_ready != is_ready or new_need != need_crew:
+                            update_ship_attributes(st.session_state.current_pilot, name, source, insurance, is_ready, need_crew, new_ins, new_ready, new_need)
 
-                                if new_ins != insurance or new_ready != is_ready or new_need != need_crew:
-                                    update_ship_attributes(st.session_state.current_pilot, name, source, insurance, is_ready, need_crew, new_ins, new_ready, new_need)
-
-                            with c_del:
-                                if st.button("🗑️", key=f"del_{i}_{name}_{source}_{is_ready}", help="Retirer"):
-                                    for s in st.session_state.db["fleet"]:
-                                        if (s["Propriétaire"] == st.session_state.current_pilot and s["Vaisseau"] == name and s["Source"] == source and s["Assurance"] == insurance and s.get("FlightReady", False) == is_ready):
-                                            to_remove = s['id']
-                                            st.session_state.db["fleet"] = [x for x in st.session_state.db["fleet"] if x['id'] != to_remove]
-                                            save_db_to_cloud(st.session_state.db)
-                                            st.rerun()
-                                            break
-
-                if not df_flags.empty:
-                    st.markdown("""<div style="text-align:center; margin: 30px 0 10px 0;"><h2 style="color: #ffaa00; border-bottom: 2px solid #ffaa00; display: inline-block;">FLOTTE AMIRALE</h2></div>""", unsafe_allow_html=True)
-                    render_fleet_grid_editable(df_flags, is_flagship=True)
-
-                st.markdown("### 🚀 FLOTTE STANDARD")
-                render_fleet_grid_editable(df_std, is_flagship=False)
-        else:
-            st.info("Hangar vide. Allez au catalogue pour ajouter des vaisseaux.")
+                    with c_del:
+                        if st.button("🗑️", key=f"del_{i}_{name}_{source}_{is_ready}", help="Retirer"):
+                            for s in st.session_state.db["fleet"]:
+                                if (s["Propriétaire"] == st.session_state.current_pilot and s["Vaisseau"] == name and s["Source"] == source and s["Assurance"] == insurance and s.get("FlightReady", False) == is_ready):
+                                    to_remove = s['id']
+                                    st.session_state.db["fleet"] = [x for x in st.session_state.db["fleet"] if x['id'] != to_remove]
+                                    save_db_to_cloud(st.session_state.db)
+                                    st.rerun()
+                                    break
 
     with tab_acq:
         st.markdown("### 🎯 CALCULATEUR D'OBJECTIF")
@@ -713,18 +654,17 @@ def corpo_fleet_page():
                     st.markdown(f"""<div class="corpo-card"><img src="{img}" class="corpo-card-img" style="height:150px;"><div class="corpo-card-header"><span style="font-size:0.9em">{row['Vaisseau']}</span><span class="corpo-card-count">x{row['id']}</span></div></div>""", unsafe_allow_html=True)
 
     with tab_table:
-        df_disp = df[['Image', 'Vaisseau', 'Rôle', 'Propriétaire', 'Source', 'FlightReady', 'NeedCrew']].copy()
-        df_disp['Image'] = df_disp['Image'].apply(get_local_img_as_base64)
-        st.dataframe(
-            df_disp, 
-            use_container_width=True, 
-            column_config={
-                "Image": st.column_config.ImageColumn("Aperçu", width=150),
-                "FlightReady": st.column_config.CheckboxColumn("Flight Ready"),
-                "NeedCrew": st.column_config.CheckboxColumn("Crew"),
-            },
-            height=800
-        )
+        c_search, c_void = st.columns([2, 1])
+        with c_search: search = st.text_input("🔍 Filtrer...", "")
+        df_disp = df.copy()
+        if search:
+            m = search.lower()
+            df_disp = df_disp[df_disp["Vaisseau"].str.lower().str.contains(m) | df_disp["Propriétaire"].str.lower().str.contains(m) | df_disp["Rôle"].str.lower().str.contains(m)]
+
+        grp = df_disp.groupby(['Vaisseau', 'Source', 'Rôle']).agg({'Propriétaire': lambda x: ', '.join(sorted(x.unique())), 'id': 'count', 'Image': 'first'}).reset_index().rename(columns={'id': 'Quantité'})
+        grp['Visuel'] = grp['Image'].apply(get_local_img_as_base64)
+        
+        st.dataframe(grp[['Visuel', 'Vaisseau', 'Rôle', 'Source', 'Propriétaire', 'Quantité']], column_config={"Visuel": st.column_config.ImageColumn("Aperçu", width=150)}, use_container_width=True, hide_index=True, height=800)
 
     with tab_members:
         st.subheader("👥 LISTE DES MEMBRES")
@@ -740,10 +680,8 @@ def corpo_fleet_page():
             data_members.append({"Pilote": p, "Vaisseaux": len(p_ships), "Objectif Actuel": target_p})
         st.dataframe(pd.DataFrame(data_members), use_container_width=True, hide_index=True)
 
-# --- PAGE ADMIN ---
 def admin_page():
     st.subheader("🔧 ADMINISTRATION")
-    
     admin_code_db = st.session_state.db.get("admin_code", "9999")
 
     if not st.session_state.get("admin_unlocked", False):
@@ -769,8 +707,9 @@ def admin_page():
         new_code = st.text_input("Nouveau Code Corpo")
         if st.button("METTRE À JOUR LE CODE"):
             if new_code:
-                st.session_state.db["corpo_code"] = new_code
-                if save_db_to_cloud(st.session_state.db):
+                db = st.session_state.db
+                db["corpo_code"] = new_code
+                if save_db_to_cloud(db):
                     st.success(f"Code Corpo changé : {new_code}")
         
         st.markdown("---")
@@ -780,7 +719,6 @@ def admin_page():
 
 # --- MAIN LOOP ---
 render_sidebar()
-
 if not st.session_state.current_pilot:
     home_page()
 else:
