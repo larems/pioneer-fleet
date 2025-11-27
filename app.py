@@ -23,7 +23,7 @@ FLAGSHIPS_LIST = [
 ]
 
 # --- 2. GESTION DATABASE (JSONBIN.IO) ---
-JSONBIN_ID = st.secrets.get("JSONBIN_ID", "6921f0ded0ea881f40f9933f")
+JSONBIN_ID = st.secrets.get("JSONBIN_ID", "6921f0ded0ea881f40f9433f")
 JSONBIN_KEY = st.secrets.get("JSONBIN_KEY", "")
 
 def normalize_db_schema(db: dict) -> dict:
