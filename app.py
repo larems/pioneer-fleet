@@ -1005,7 +1005,7 @@ def admin_page():
     st.subheader("🔧 ADMINISTRATION")
     
     # 1. Récupération sécurisée du code admin (depuis DB)
-    admin_code_db = st.session_state.db.get("admin_code", "9999")
+    admin_code_db = st.session_state.db.get("admin_code")
 
     if not st.session_state.get("admin_unlocked", False):
         pwd = st.text_input("Code d'accès Admin", type="password")
