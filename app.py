@@ -28,11 +28,8 @@ JSONBIN_KEY = st.secrets.get("JSONBIN_KEY", "")
 
 def normalize_db_schema(db: dict) -> dict:
     """Normalise la structure de la DB."""
-    # --- AJOUTS SECURITE ---
-    # Si absent, on met des valeurs par défaut pour éviter le crash
     db.setdefault("admin_code", "9999") 
     db.setdefault("corpo_code", "APQ8M3")
-    
     db.setdefault("users", {})
     db.setdefault("fleet", [])
     db.setdefault("user_data", {}) 
@@ -71,7 +68,6 @@ def normalize_db_schema(db: dict) -> dict:
 def load_db_from_cloud():
     if not JSONBIN_KEY:
         st.warning("⚠️ Clé JSONBin.io manquante. Mode hors ligne.")
-        # Structure par défaut en local
         return {"users": {}, "fleet": [], "admin_code": "9999", "corpo_code": "APQ8M3"}
     url = f"https://api.jsonbin.io/v3/b/{JSONBIN_ID}/latest"
     headers = {"X-Master-Key": JSONBIN_KEY}
@@ -219,7 +215,7 @@ def submit_cart_batch():
         st.session_state.cart = []
         time.sleep(1)
         st.rerun()
-        
+
 # --- FONCTIONS ADMIN ---
 def admin_delete_user(target_pilot):
     """Supprime toutes les traces d'un utilisateur."""
@@ -239,15 +235,6 @@ def admin_delete_user(target_pilot):
     if save_db_to_cloud(db):
         st.success(f"Utilisateur {target_pilot} totalement supprimé ({deleted_count} vaisseaux).")
         time.sleep(2)
-        st.rerun()
-
-def admin_update_corpo_code(new_code):
-    """Modifie le code de la corpo."""
-    db = st.session_state.db
-    db["corpo_code"] = new_code
-    if save_db_to_cloud(db):
-        st.success("Code Corporation mis à jour !")
-        time.sleep(1)
         st.rerun()
 
 # --- 4. CSS ---
@@ -380,16 +367,14 @@ def home_page():
             st.subheader("CONNEXION")
             pseudo = st.text_input("Identifiant")
             pin = st.text_input("PIN (4 chiffres)", type="password", max_chars=4)
-            # NOUVEAU : Code Corpo
-            corpo_pwd = st.text_input("Code Corporation", type="password")
+            corpo_pass = st.text_input("Code Corporation", type="password")
             
             if st.form_submit_button("SE CONNECTER", type="primary"):
-                # VERIFICATION CODE CORPO
                 real_corpo = st.session_state.db.get("corpo_code", "APQ8M3")
-                if corpo_pwd != real_corpo:
+                if corpo_pass != real_corpo:
                     st.error("Code Corporation incorrect.")
                     st.stop()
-                
+
                 if not pseudo or not pin.isdigit(): st.error("Format invalide.")
                 else:
                     users = st.session_state.db["users"]
@@ -416,7 +401,7 @@ def catalogue_page():
         
     with col_main:
         st.subheader(f"REGISTRE ({len(st.session_state.cart)} SÉLECTIONNÉS)")
-        search = st.multiselect("RECHERCHE", sorted(list(SHIPS_DB.keys())), placeholder="🔍 Rechercher un vaisseau...", label_visibility="collapsed")
+        search = st.multiselect("RECHERCHE", sorted(list(SHIPS_DB.keys())), placeholder="🔍 Vaisseau...", label_visibility="collapsed")
         filtered = {}
         for name, data in SHIPS_DB.items():
             if f_brand != "Tous" and data.get("brand") != f_brand: continue
@@ -435,12 +420,8 @@ def catalogue_page():
         if c3.button("►", disabled=(st.session_state.catalog_page==total_pages-1)): st.session_state.catalog_page += 1; st.rerun()
 
         start = st.session_state.catalog_page * PER_PAGE
-        current_batch = items[start : start + PER_PAGE]
-        
-        if not current_batch: st.info("Aucun vaisseau.")
-        
         cols = st.columns(2)
-        for i, (name, data) in enumerate(current_batch):
+        for i, (name, data) in enumerate(items[start : start + PER_PAGE]):
             with cols[i % 2]:
                 img_b64 = get_local_img_as_base64(data.get("img", ""))
                 pv = data.get('price', 0) if p_source == "STORE" else data.get('auec_price', 0)
@@ -457,7 +438,7 @@ def catalogue_page():
                 </div>""", unsafe_allow_html=True)
                 
                 if st.button(f"AJOUTER", key=f"add_{name}", use_container_width=True):
-                    st.session_state.cart.append({'name': name, 'source': p_source, 'insurance': p_ins})
+                    st.session_state.cart.append({'name': name, 'source': p_source, 'insurance': p_ins, 'price_disp': price_str})
                     st.rerun()
 
     with col_cart:
@@ -473,7 +454,9 @@ def catalogue_page():
             st.markdown(f"### 🛒 PANIER ({len(st.session_state.cart)})")
             cart_counts = {}
             for item in st.session_state.cart:
-                key = (item['name'], item['source'], item['insurance'], item['price_disp'])
+                # FIX ERROR HERE (Adding safe .get for old items)
+                p_disp = item.get('price_disp', 'N/A')
+                key = (item['name'], item['source'], item['insurance'], p_disp)
                 cart_counts[key] = cart_counts.get(key, 0) + 1
             
             for (c_name, c_src, c_ins, c_prc), count in cart_counts.items():
@@ -506,105 +489,123 @@ def my_hangar_page():
             st.info("Hangar vide.")
         else:
             df = pd.DataFrame(my_fleet)
+            total_usd_personal = 0
+            total_auec_personal = 0
+            for _, row in df.iterrows():
+                if row['Source'] == 'STORE': total_usd_personal += get_current_ship_price(row['Vaisseau'], 'USD')
+                elif row['Source'] == 'INGAME': total_auec_personal += get_current_ship_price(row['Vaisseau'], 'aUEC')
+
+            col_m1, col_m2, col_m3 = st.columns(3)
+            col_m1.metric("VALEUR PLEDGE (USD)", f"${total_usd_personal:,.0f}")
+            col_m2.metric("VALEUR IN-GAME (aUEC)", f"{total_auec_personal:,.0f}")
+            col_m3.metric("VAISSEAUX", len(df))
+            st.markdown("---")
+
             if search_hangar:
                 m = search_hangar.lower()
-                df = df[df["Vaisseau"].str.lower().str.contains(m) | df["Rôle"].str.lower().str.contains(m)]
+                df = df[df["Vaisseau"].str.lower().str.contains(m) | df["Rôle"].str.lower().str.contains(m) | df["Source"].str.lower().str.contains(m)]
 
-            df['is_flagship'] = df['Vaisseau'].apply(check_is_high_value)
-            
-            grp = df.groupby(['Vaisseau', 'Source', 'Assurance', 'FlightReady', 'NeedCrew']).agg({
-                'id': 'count', 'Image': 'first', 'crew_max': 'max'
-            }).reset_index().rename(columns={'id': 'Quantité'})
-            
-            cols = st.columns(3)
-            for i, row in grp.iterrows():
-                with cols[i % 3]:
-                    name = row['Vaisseau']
-                    source = row['Source']
-                    insurance = row['Assurance']
-                    is_ready = row['FlightReady']
-                    need_crew = row['NeedCrew']
-                    count = row['Quantité']
-                    max_slots = int(row['crew_max']) if row['crew_max'] else 1
+            if df.empty:
+                st.info("Aucun vaisseau trouvé avec cette recherche.")
+            else:
+                df['is_flagship'] = df['Vaisseau'].apply(check_is_high_value)
+                df_flags = df[df['is_flagship'] == True].copy()
+                df_std = df[df['is_flagship'] == False].copy()
+                df_flags = df_flags.sort_values(by='Vaisseau')
+                df_std = df_std.sort_values(by='Vaisseau')
+
+                def render_fleet_grid_editable(dataframe, is_flagship=False):
+                    if dataframe.empty: return
                     
-                    img_path = SHIPS_DB.get(name, {}).get('img', '')
-                    img_b64 = get_local_img_as_base64(img_path)
-
-                    info = SHIPS_DB.get(name, {})
-                    if source == 'STORE':
-                        p_display = f"${info.get('price', 0):,.0f} USD"
-                        p_col = "#00d4ff"
-                    else:
-                        p_display = f"{info.get('auec_price', 0):,.0f} aUEC"
-                        p_col = "#30e8ff"
+                    # MODIF: Groupement FlightReady + NeedCrew
+                    grp = dataframe.groupby(['Vaisseau', 'Source', 'Assurance', 'FlightReady', 'NeedCrew']).agg({
+                        'id': 'count', 'Image': 'first', 'crew_max': 'max'
+                    }).reset_index().rename(columns={'id': 'Quantité'})
                     
-                    card_class = "corpo-card flagship-card" if df.iloc[0]['is_flagship'] else "corpo-card"
-                    if need_crew: card_class += " crew-card"
-                    img_style = "height:350px;" if df.iloc[0]['is_flagship'] else "height:200px;"
-                    crew_badge = f"<span class='crew-tag'>CREW MAX: {max_slots}</span>" if need_crew else ""
+                    cols = st.columns(3)
+                    for i, row in grp.iterrows():
+                        with cols[i % 3]:
+                            name = row['Vaisseau']
+                            source = row['Source']
+                            insurance = row['Assurance']
+                            is_ready = row['FlightReady']
+                            need_crew = row['NeedCrew']
+                            count = row['Quantité']
+                            max_slots = int(row['crew_max']) if row['crew_max'] else 1
+                            
+                            img_path = SHIPS_DB.get(name, {}).get('img', '')
+                            img_b64 = get_local_img_as_base64(img_path)
 
-                    st.markdown(f"""
-                    <div class="{card_class}">
-                        <img src="{img_b64}" class="corpo-card-img" style="{img_style}">
-                        <div class="corpo-card-header">
-                            <span class="corpo-card-title">{name}</span>
-                            <span class="corpo-card-count">x{count}</span>
-                        </div>
-                        <div class="corpo-card-body">
-                            <div style="display:flex; justify-content:space-between;">
-                                <span>{source}</span>
-                                <span style="color:{p_col}; font-weight:bold;">{p_display}</span>
-                            </div>
-                            <div style="margin-top:5px;">{crew_badge}</div>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    c_edit, c_del = st.columns([3, 1])
-                    with c_edit:
-                        ins_opts = ["LTI", "10 Ans", "2 ans", "6 Mois", "2 Mois", "Standard"]
-                        new_ins = st.selectbox("Assurance", ins_opts, index=ins_opts.index(insurance) if insurance in ins_opts else 5, key=f"ins_{i}_{name}_{source}_{is_ready}", label_visibility="collapsed")
-                        c_t1, c_t2 = st.columns(2)
-                        with c_t1:
-                            new_ready = st.toggle("🚀 Flight Ready", value=is_ready, key=f"ready_{i}_{name}_{source}")
-                        with c_t2:
-                            new_need = st.toggle("📢 Search Crew", value=need_crew, key=f"need_{i}_{name}_{source}")
+                            info = SHIPS_DB.get(name, {})
+                            p_display = f"${info.get('price', 0):,.0f} USD" if source == 'STORE' else f"{info.get('auec_price', 0):,.0f} aUEC"
+                            p_col = "#00d4ff" if source == 'STORE' else "#30e8ff"
+                            
+                            card_class = "corpo-card flagship-card" if is_flagship else "corpo-card"
+                            if need_crew: card_class += " crew-card"
+                            img_style = "height:350px;" if is_flagship else "height:200px;"
+                            crew_badge = f"<span class='crew-tag'>CREW MAX: {max_slots}</span>" if need_crew else ""
 
-                        if new_ins != insurance or new_ready != is_ready or new_need != need_crew:
-                            update_ship_attributes(st.session_state.current_pilot, name, source, insurance, is_ready, need_crew, new_ins, new_ready, new_need)
+                            st.markdown(f"""
+                            <div class="{card_class}">
+                                <img src="{img_b64}" class="corpo-card-img" style="{img_style}">
+                                <div class="corpo-card-header">
+                                    <span class="corpo-card-title">{name}</span>
+                                    <span class="{st.secrets.get('dummy','corpo-card-count')}">x{count}</span>
+                                </div>
+                                <div class="corpo-card-body">
+                                    <div style="display:flex; justify-content:space-between;">
+                                        <span>{source}</span>
+                                        <span style="color:{p_col}; font-weight:bold;">{p_display}</span>
+                                    </div>
+                                    <div style="margin-top:5px;">{crew_badge}</div>
+                                </div>
+                            </div>""", unsafe_allow_html=True)
+                            
+                            c_edit, c_del = st.columns([3, 1])
+                            with c_edit:
+                                ins_opts = ["LTI", "10 Ans", "2 ans", "6 Mois", "2 Mois", "Standard"]
+                                new_ins = st.selectbox("Assurance", ins_opts, index=ins_opts.index(insurance) if insurance in ins_opts else 5, key=f"ins_{i}_{name}_{source}_{is_ready}", label_visibility="collapsed")
+                                c_t1, c_t2 = st.columns(2)
+                                with c_t1:
+                                    new_ready = st.toggle("🚀 Flight Ready", value=is_ready, key=f"ready_{i}_{name}_{source}")
+                                with c_t2:
+                                    new_need = st.toggle("📢 Search Crew", value=need_crew, key=f"need_{i}_{name}_{source}")
 
-                    with c_del:
-                        if st.button("🗑️", key=f"del_{i}_{name}_{source}_{is_ready}", help="Retirer"):
-                            to_remove_id = None
-                            for s in st.session_state.db["fleet"]:
-                                if (s["Propriétaire"] == st.session_state.current_pilot and 
-                                    s["Vaisseau"] == name and 
-                                    s["Source"] == source and 
-                                    s["Assurance"] == insurance and
-                                    s.get("FlightReady", False) == is_ready):
-                                    to_remove_id = s["id"]
-                                    break
-                            if to_remove_id:
-                                st.session_state.db["fleet"] = [s for s in st.session_state.db["fleet"] if s["id"] != to_remove_id]
-                                save_db_to_cloud(st.session_state.db)
-                                st.rerun()
+                                if new_ins != insurance or new_ready != is_ready or new_need != need_crew:
+                                    update_ship_attributes(st.session_state.current_pilot, name, source, insurance, is_ready, need_crew, new_ins, new_ready, new_need)
+
+                            with c_del:
+                                if st.button("🗑️", key=f"del_{i}_{name}_{source}_{is_ready}", help="Retirer"):
+                                    for s in st.session_state.db["fleet"]:
+                                        if (s["Propriétaire"] == st.session_state.current_pilot and s["Vaisseau"] == name and s["Source"] == source and s["Assurance"] == insurance and s.get("FlightReady", False) == is_ready):
+                                            to_remove = s['id']
+                                            st.session_state.db["fleet"] = [x for x in st.session_state.db["fleet"] if x['id'] != to_remove]
+                                            save_db_to_cloud(st.session_state.db)
+                                            st.rerun()
+                                            break
+
+                if not df_flags.empty:
+                    st.markdown("""<div style="text-align:center; margin: 30px 0 10px 0;"><h2 style="color: #ffaa00; border-bottom: 2px solid #ffaa00; display: inline-block;">FLOTTE AMIRALE</h2></div>""", unsafe_allow_html=True)
+                    render_fleet_grid_editable(df_flags, is_flagship=True)
+
+                st.markdown("### 🚀 FLOTTE STANDARD")
+                render_fleet_grid_editable(df_std, is_flagship=False)
+        else:
+            st.info("Hangar vide. Allez au catalogue pour ajouter des vaisseaux.")
 
     with tab_acq:
         st.markdown("### 🎯 CALCULATEUR D'OBJECTIF")
         opts = ["—"] + sorted([n for n, d in SHIPS_DB.items() if d.get('ingame')])
         idx = opts.index(target) if target in opts else 0
         new_tgt = st.selectbox("Cible", opts, index=idx)
-        
         c1, c2 = st.columns([1, 2])
         if "calc_balance" not in st.session_state: st.session_state.calc_balance = int(current_auec)
         
         with c1:
+            st.number_input("Solde", value=st.session_state.calc_balance, step=10000, key="nm_val", on_change=lambda: st.session_state.update({"calc_balance": st.session_state.nm_val}))
             tgt_price = SHIPS_DB[new_tgt].get('auec_price', 0) if new_tgt != "—" else 0
             sl_max = max(1000000, int(tgt_price * 1.2))
-            def update_sl(): st.session_state.calc_balance = st.session_state.sl_val
-            def update_nm(): st.session_state.calc_balance = st.session_state.nm_val
-            st.number_input("Solde", value=st.session_state.calc_balance, step=10000, key="nm_val", on_change=update_nm)
-            st.slider("Jauge", 0, sl_max, value=st.session_state.calc_balance, key="sl_val", on_change=update_sl)
+            st.slider("Jauge", 0, sl_max, value=st.session_state.calc_balance, key="sl_val", on_change=lambda: st.session_state.update({"calc_balance": st.session_state.sl_val}))
             
             if st.button("💾 ENREGISTRER", type="primary", use_container_width=True):
                 st.session_state.db["user_data"][st.session_state.current_pilot] = {"auec_balance": st.session_state.calc_balance, "acquisition_target": new_tgt}
@@ -685,65 +686,51 @@ def corpo_fleet_page():
     tab_visu, tab_table, tab_members = st.tabs(["🚀 VUE FLOTTE", "📋 REGISTRE COMPLET", "👥 MEMBRES"])
     
     with tab_visu:
-        st.markdown("""
-        <div style="text-align:center; margin: 30px 0 10px 0;">
-            <div style="font-size: 30px; color: #ffaa00; margin-bottom: -10px;">▼</div>
-            <h2 style="color: #ffaa00; border-bottom: 2px solid #ffaa00; display: inline-block; padding: 0 20px 10px 20px;">
-                FLOTTE AMIRALE
-            </h2>
-        </div>
-        """, unsafe_allow_html=True)
-        
         df['is_flagship'] = df['Vaisseau'].apply(check_is_high_value)
-        
-        df_flagships = df[df['is_flagship'] == True]
-        df_standard = df[df['is_flagship'] == False]
-        
-        if not df_flagships.empty:
-            grp_flags = df_flagships.groupby(['Vaisseau', 'Source']).agg({
-                'Propriétaire': lambda x: sorted(x.unique()),
-                'id': 'count',
-                'Image': 'first'
-            }).reset_index()
-
+        st.markdown("#### ⭐ FLOTTE AMIRALE")
+        flags = df[df['is_flagship'] == True]
+        if not flags.empty:
             cols = st.columns(3)
-            for i, row in grp_flags.iterrows():
-                with cols[i % 3]:
-                    img_b64 = get_local_img_as_base64(row['Image'])
-                    pilots_html = "".join([f"<span class='corpo-pilot-tag'>{p}</span>" for p in row['Propriétaire']])
-                    st.markdown(f"""<div class="corpo-card flagship-card"><img src="{img_b64}" class="corpo-card-img"><div class="corpo-card-header"><span>{row['Vaisseau']}</span></div><div class="corpo-card-body">{pilots_html}</div></div>""", unsafe_allow_html=True)
+            grp_f = flags.groupby(['Vaisseau']).agg({'Image':'first', 'Propriétaire': lambda x: list(set(x))}).reset_index()
+            for i, row in grp_f.iterrows():
+                with cols[i%3]:
+                    img = get_local_img_as_base64(row['Image'])
+                    pilots = "".join([f"<span class='corpo-pilot-tag'>{p}</span>" for p in row['Propriétaire']])
+                    st.markdown(f"""<div class="corpo-card flagship-card"><img src="{img}" class="corpo-card-img"><div class="corpo-card-header"><span>{row['Vaisseau']}</span></div><div class="corpo-card-body">{pilots}</div></div>""", unsafe_allow_html=True)
         
         st.markdown("#### 🚀 FLOTTE STANDARD")
-        if not df_standard.empty:
-            roles = sorted(df_standard["Rôle"].unique())
+        std = df[df['is_flagship'] == False]
+        if not std.empty:
+            roles = sorted(std['Rôle'].unique())
             sel_role = st.selectbox("📂 Filtrer par Rôle", ["Tout afficher"] + roles)
-            if sel_role != "Tout afficher": df_standard = df_standard[df_standard["Rôle"] == sel_role]
-                
-            grp_role = df_standard.groupby(['Vaisseau']).agg({'Propriétaire': lambda x: sorted(x.unique()), 'id': 'count', 'Image': 'first'}).reset_index()
-            cols_role = st.columns(3) 
-            for j, row in grp_role.iterrows():
-                with cols_role[j % 3]:
-                    img_b64 = get_local_img_as_base64(row['Image'])
-                    pilots_html = "".join([f"<span class='corpo-pilot-tag'>{p}</span>" for p in row['Propriétaire']])
-                    st.markdown(f"""<div class="corpo-card"><img src="{img_b64}" class="corpo-card-img"><div class="corpo-card-header"><span class="corpo-card-title">{row['Vaisseau']}</span><span class="corpo-card-count">x{row['id']}</span></div><div class="corpo-card-body"><div>{pilots_html}</div></div></div>""", unsafe_allow_html=True)
+            if sel_role != "Tout afficher": std = std[std['Rôle'] == sel_role]
+            
+            cols = st.columns(4)
+            grp_s = std.groupby(['Vaisseau']).agg({'id':'count', 'Image':'first'}).reset_index()
+            for i, row in grp_s.iterrows():
+                with cols[i%4]:
+                    img = get_local_img_as_base64(row['Image'])
+                    st.markdown(f"""<div class="corpo-card"><img src="{img}" class="corpo-card-img" style="height:150px;"><div class="corpo-card-header"><span style="font-size:0.9em">{row['Vaisseau']}</span><span class="corpo-card-count">x{row['id']}</span></div></div>""", unsafe_allow_html=True)
 
     with tab_table:
-        c_search, c_void = st.columns([2, 1])
-        with c_search: search = st.text_input("🔍 Filtrer...", "")
-        df_filtered = df.copy()
-        if search:
-            m = search.lower()
-            df_filtered = df_filtered[df_filtered["Vaisseau"].str.lower().str.contains(m) | df_filtered["Propriétaire"].str.lower().str.contains(m) | df_filtered["Rôle"].str.lower().str.contains(m)]
-
-        grp = df_filtered.groupby(['Vaisseau', 'Source', 'Rôle']).agg({'Propriétaire': lambda x: ', '.join(sorted(x.unique())), 'id': 'count', 'Image': 'first'}).reset_index().rename(columns={'id': 'Quantité'})
-        grp['Visuel'] = grp['Image'].apply(get_local_img_as_base64)
-        grp['Valeur'] = grp.apply(lambda r: f"${SHIPS_DB.get(r['Vaisseau'],{}).get('price',0):,.0f}" if r['Source']=='STORE' else f"{SHIPS_DB.get(r['Vaisseau'],{}).get('auec_price',0):,.0f} aUEC", axis=1)
-        
-        st.dataframe(grp[['Visuel', 'Vaisseau', 'Rôle', 'Source', 'Propriétaire', 'Quantité', 'Valeur']], column_config={"Visuel": st.column_config.ImageColumn("Aperçu", width=150)}, use_container_width=True, hide_index=True, height=800)
+        df_disp = df[['Image', 'Vaisseau', 'Rôle', 'Propriétaire', 'Source', 'FlightReady', 'NeedCrew']].copy()
+        df_disp['Image'] = df_disp['Image'].apply(get_local_img_as_base64)
+        st.dataframe(
+            df_disp, 
+            use_container_width=True, 
+            column_config={
+                "Image": st.column_config.ImageColumn("Aperçu", width=150),
+                "FlightReady": st.column_config.CheckboxColumn("Flight Ready"),
+                "NeedCrew": st.column_config.CheckboxColumn("Crew"),
+            },
+            height=800
+        )
 
     with tab_members:
         st.subheader("👥 LISTE DES MEMBRES")
-        all_pilots = sorted(list(set(df["Propriétaire"].unique()) | set(st.session_state.db["users"].keys())))
+        all_users = set(st.session_state.db["users"].keys())
+        all_owners = set(df["Propriétaire"].unique())
+        all_pilots = sorted(list(all_users | all_owners))
         if "INCONNU" in all_pilots: all_pilots.remove("INCONNU")
         
         data_members = []
@@ -753,8 +740,10 @@ def corpo_fleet_page():
             data_members.append({"Pilote": p, "Vaisseaux": len(p_ships), "Objectif Actuel": target_p})
         st.dataframe(pd.DataFrame(data_members), use_container_width=True, hide_index=True)
 
+# --- PAGE ADMIN ---
 def admin_page():
     st.subheader("🔧 ADMINISTRATION")
+    
     admin_code_db = st.session_state.db.get("admin_code", "9999")
 
     if not st.session_state.get("admin_unlocked", False):
@@ -766,32 +755,24 @@ def admin_page():
             else:
                 st.error("Code incorrect.")
     else:
-        # GESTION JOUEURS
-        st.markdown("### 👤 Gestion des Joueurs")
+        st.warning("⚠️ ZONE DANGEREUSE")
         users_list = list(st.session_state.db["users"].keys())
         target_user = st.selectbox("Supprimer un membre", ["-- Choisir --"] + users_list)
         
         if target_user != "-- Choisir --":
-            st.error(f"ATTENTION : Suppression définitive de {target_user} !")
+            st.error(f"Supprimer {target_user} ?")
             if st.button("CONFIRMER SUPPRESSION", type="primary"):
                 admin_delete_user(target_user)
 
         st.markdown("---")
-        
-        # GESTION CODE CORPO
-        st.markdown("### 🔐 Modifier le Code Corporation")
-        new_corpo_code = st.text_input("Nouveau Code Corpo")
+        st.markdown("### 🔐 Code Corporation")
+        new_code = st.text_input("Nouveau Code Corpo")
         if st.button("METTRE À JOUR LE CODE"):
-            if new_corpo_code:
-                db = st.session_state.db
-                db["corpo_code"] = new_corpo_code
-                if save_db_to_cloud(db):
-                    st.success(f"Code mis à jour : {new_corpo_code}")
-                    time.sleep(2)
-                    st.rerun()
-            else:
-                st.warning("Veuillez entrer un code valide.")
-
+            if new_code:
+                st.session_state.db["corpo_code"] = new_code
+                if save_db_to_cloud(st.session_state.db):
+                    st.success(f"Code Corpo changé : {new_code}")
+        
         st.markdown("---")
         if st.button("Se déconnecter"):
             st.session_state.admin_unlocked = False
