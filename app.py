@@ -15,10 +15,6 @@ st.set_page_config(
 )
 BACKGROUND_IMAGE = "assets/fondecransite.png"
 
-# Code Admin récupéré des secrets (ou défaut pour test local si pas de secrets)
-# AJOUTEZ "admin_code = 'votre_code'" dans .streamlit/secrets.toml
-ADMIN_ACCESS_CODE = st.secrets.get("ADMIN_CODE", "9999") 
-
 # Liste des vaisseaux considérés comme "Majeurs"
 FLAGSHIPS_LIST = [
     "Javelin", "Idris-M", "Idris-P", "Kraken", "Kraken Privateer", 
@@ -32,6 +28,8 @@ JSONBIN_KEY = st.secrets.get("JSONBIN_KEY", "")
 
 def normalize_db_schema(db: dict) -> dict:
     """Normalise la structure de la DB."""
+    # On s'assure que les clés existent, mais on ne touche pas à admin_code s'il est déjà là
+    db.setdefault("admin_code", "9999") # Fallback au cas où le JSON est vide
     db.setdefault("users", {})
     db.setdefault("fleet", [])
     db.setdefault("user_data", {}) 
@@ -70,7 +68,7 @@ def normalize_db_schema(db: dict) -> dict:
 def load_db_from_cloud():
     if not JSONBIN_KEY:
         st.warning("⚠️ Clé JSONBin.io manquante. Mode hors ligne.")
-        return {"users": {}, "fleet": []}
+        return {"users": {}, "fleet": [], "admin_code": "9999"}
     url = f"https://api.jsonbin.io/v3/b/{JSONBIN_ID}/latest"
     headers = {"X-Master-Key": JSONBIN_KEY}
     try:
@@ -79,7 +77,7 @@ def load_db_from_cloud():
             return normalize_db_schema(response.json().get("record", {}))
     except Exception as e:
         st.error(f"Erreur DB: {e}")
-    return {"users": {}, "fleet": []}
+    return {"users": {}, "fleet": [], "admin_code": "9999"}
 
 def save_db_to_cloud(data):
     if not JSONBIN_KEY: return False
@@ -145,7 +143,7 @@ def update_ship_attributes(pilot, ship_name, source, old_ins, old_ready, old_nee
     
     if updated:
         save_db_to_cloud(st.session_state.db)
-        st.toast("Mise à jour effectuée !", icon="✅")
+        st.toast("Vaisseau mis à jour !", icon="✅")
         time.sleep(0.5)
         st.rerun()
 
@@ -172,6 +170,7 @@ def submit_cart_batch():
     if not st.session_state.current_pilot:
         st.error("Vous devez être connecté.")
         return
+
     if not st.session_state.cart:
         st.warning("Votre panier est vide.")
         return
@@ -217,25 +216,30 @@ def submit_cart_batch():
         st.session_state.cart = []
         time.sleep(1)
         st.rerun()
-        
-# --- FONCTION ADMIN (AJOUTÉE) ---
+
+# --- FONCTION SUPPRESSION ADMIN ---
 def admin_delete_user(target_pilot):
+    """Supprime toutes les traces d'un utilisateur."""
     db = st.session_state.db
-    # 1. Supprimer User
-    if target_pilot in db["users"]: del db["users"][target_pilot]
-    # 2. Supprimer Data
-    if target_pilot in db["user_data"]: del db["user_data"][target_pilot]
-    # 3. Supprimer Vaisseaux
-    initial_len = len(db["fleet"])
+    
+    # 1. Supprimer le login
+    if target_pilot in db["users"]:
+        del db["users"][target_pilot]
+    
+    # 2. Supprimer les données perso
+    if target_pilot in db["user_data"]:
+        del db["user_data"][target_pilot]
+    
+    # 3. Supprimer les vaisseaux
     db["fleet"] = [s for s in db["fleet"] if s["Propriétaire"] != target_pilot]
-    deleted_count = initial_len - len(db["fleet"])
-    # 4. Retirer des Crews
+    
+    # 4. Retirer des équipages
     for s in db["fleet"]:
         if target_pilot in s.get("CrewList", []):
             s["CrewList"].remove(target_pilot)
             
     if save_db_to_cloud(db):
-        st.success(f"Utilisateur {target_pilot} supprimé ({deleted_count} vaisseaux retirés).")
+        st.success(f"Utilisateur {target_pilot} totalement supprimé.")
         time.sleep(2)
         st.rerun()
 
@@ -258,6 +262,7 @@ p, div, span, label, button {{ font-family: 'Rajdhani', sans-serif !important; }
 /* LOCK SIDEBAR */
 section[data-testid="stSidebar"] button {{ display: none !important; }}
 [data-testid="collapsedControl"] {{ display: none !important; }}
+[data-testid="stSidebarCollapsedControl"] {{ display: none !important; }}
 
 /* CORPO CARD STYLE */
 .corpo-card {{
@@ -270,7 +275,7 @@ section[data-testid="stSidebar"] button {{ display: none !important; }}
     transition: transform 0.2s, box-shadow 0.2s;
 }}
 .corpo-card:hover {{ transform: translateY(-4px); border-color: #00d4ff; box-shadow: 0 0 15px rgba(0, 212, 255, 0.15); }}
-.corpo-card-img {{ width: 100%; height: 220px; object-fit: cover; border-bottom: 1px solid #163347; }} 
+.corpo-card-img {{ width: 100%; height: 200px; object-fit: cover; border-bottom: 1px solid #163347; }} 
 .corpo-card-header {{ padding: 10px 14px; background: rgba(0,0,0,0.4); display:flex; justify-content:space-between; align-items:center; }}
 .corpo-card-title {{ font-family: 'Orbitron'; font-size: 1.2em; color: white; font-weight: bold; text-shadow: 0 2px 4px black; }}
 .corpo-card-count {{ background: #00d4ff; color: #000; padding: 4px 10px; border-radius: 6px; font-weight: bold; font-family: 'Orbitron'; box-shadow: 0 0 10px rgba(0,212,255,0.4); }}
@@ -329,7 +334,7 @@ if "menu_nav" not in st.session_state: st.session_state.menu_nav = "CATALOGUE"
 if "selected_source" not in st.session_state: st.session_state.selected_source = "STORE"
 if "selected_insurance" not in st.session_state: st.session_state.selected_insurance = "LTI"
 if "cart" not in st.session_state: st.session_state.cart = [] 
-if "admin_unlocked" not in st.session_state: st.session_state.admin_unlocked = False # ADMIN STATE
+if "admin_unlocked" not in st.session_state: st.session_state.admin_unlocked = False
 
 # --- 6. SIDEBAR ---
 def render_sidebar():
@@ -341,7 +346,6 @@ def render_sidebar():
                 st.session_state.current_pilot = None; st.session_state.cart = []; st.session_state.admin_unlocked = False; st.rerun()
             st.markdown("---")
             
-            # AJOUT MENU ADMIN
             nav_opts = ["CATALOGUE", "MON HANGAR", "FLOTTE CORPO", "NEED CREW", "ADMINISTRATION"]
             curr_idx = 0
             if st.session_state.menu_nav in nav_opts:
@@ -995,15 +999,14 @@ def corpo_fleet_page():
 def admin_page():
     st.subheader("🔧 ADMINISTRATION")
     
-    # Zone de connexion Admin
-    if "admin_unlocked" not in st.session_state:
-        st.session_state.admin_unlocked = False
+    # 1. Récupération sécurisée du code admin (depuis DB)
+    # Le code doit être présent dans le JSON sous la clé "admin_code"
+    admin_code_db = st.session_state.db.get("admin_code", "9999")
 
-    if not st.session_state.admin_unlocked:
+    if not st.session_state.get("admin_unlocked", False):
         pwd = st.text_input("Code d'accès Admin", type="password")
         if st.button("ACCÉDER"):
-            # Vérification avec le code secret (stocké dans secrets.toml ou variables d'env)
-            if pwd == ADMIN_ACCESS_CODE:
+            if pwd == admin_code_db:
                 st.session_state.admin_unlocked = True
                 st.rerun()
             else:
@@ -1011,7 +1014,6 @@ def admin_page():
     else:
         st.warning("⚠️ ZONE DANGEREUSE : Actions irréversibles")
         
-        # Liste des utilisateurs pour suppression
         users_list = list(st.session_state.db["users"].keys())
         if not users_list:
             st.info("Aucun utilisateur enregistré.")
@@ -1023,25 +1025,7 @@ def admin_page():
                 st.markdown("Cela effacera : \n- Son compte (Login/Pin)\n- Ses données personnelles (Solde, Objectifs)\n- Tous ses vaisseaux de la flotte\n- Ses inscriptions dans les équipages")
                 
                 if st.button(f"CONFIRMER LA SUPPRESSION DE {target_user}", type="primary"):
-                    db = st.session_state.db
-                    
-                    # 1. Supprimer User
-                    if target_user in db["users"]: del db["users"][target_user]
-                    # 2. Supprimer Data
-                    if target_user in db["user_data"]: del db["user_data"][target_user]
-                    # 3. Supprimer Vaisseaux
-                    initial_len = len(db["fleet"])
-                    db["fleet"] = [s for s in db["fleet"] if s["Propriétaire"] != target_user]
-                    deleted_count = initial_len - len(db["fleet"])
-                    # 4. Retirer des Crews
-                    for s in db["fleet"]:
-                        if target_user in s.get("CrewList", []):
-                            s["CrewList"].remove(target_user)
-                            
-                    if save_db_to_cloud(db):
-                        st.success(f"Utilisateur {target_user} supprimé avec succès ({deleted_count} vaisseaux retirés).")
-                        time.sleep(2)
-                        st.rerun()
+                    admin_delete_user(target_user)
         
         st.markdown("---")
         if st.button("Se déconnecter de l'Admin"):
