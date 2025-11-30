@@ -23,6 +23,7 @@ FLAGSHIPS_LIST = [
 ]
 
 # --- 2. GESTION DATABASE (JSONBIN.IO) ---
+# ID Correct (basé sur tes précédentes corrections)
 JSONBIN_ID = st.secrets.get("JSONBIN_ID", "6921f0ded0ea881f40f9433f")
 JSONBIN_KEY = st.secrets.get("JSONBIN_KEY", "")
 
@@ -676,7 +677,10 @@ def corpo_fleet_page():
 
         grp = df_disp.groupby(['Vaisseau', 'Source', 'Rôle']).agg({'Propriétaire': lambda x: ', '.join(sorted(x.unique())), 'id': 'count', 'Image': 'first'}).reset_index().rename(columns={'id': 'Quantité'})
         grp['Visuel'] = grp['Image'].apply(get_local_img_as_base64)
-        grp['Valeur'] = grp.apply(lambda r: f"${SHIPS_DB.get(r['Vaisseau'],{}).get('price',0):,.0f}" if r['Source']=='STORE' else f"{SHIPS_DB.get(r['Vaisseau'],{}).get('auec_price',0):,.0f} aUEC", axis=1)
+        
+        # --- CORRECTION DE L'ERREUR ICI ---
+        # Utilisation de la fonction get_current_ship_price pour éviter le crash sur les valeurs vides/None
+        grp['Valeur'] = grp.apply(lambda r: f"${get_current_ship_price(r['Vaisseau'], 'USD'):,.0f}" if r['Source']=='STORE' else f"{get_current_ship_price(r['Vaisseau'], 'aUEC'):,.0f} aUEC", axis=1)
         
         # CORRECTION: Largeur fixe pour l'image (pour le menu)
         st.dataframe(grp[['Visuel', 'Vaisseau', 'Rôle', 'Source', 'Propriétaire', 'Quantité', 'Valeur']], column_config={"Visuel": st.column_config.ImageColumn("Aperçu", width=150)}, use_container_width=True, hide_index=True, height=800)
